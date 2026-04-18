@@ -393,12 +393,24 @@ function App() {
 			setErrorMsg(undefined);
   	};
 
+	// Обработчик отмены переподключения
+	const handleCancelRetry = async () => {
+		// Удаляем токен и возвращаемся на экран авторизации
+		await yandexApi.deleteSecureToken();
+		
+		setToken(null);
+		setUserData(null);
+		setRetryInfo(null);
+		setAppState(AppState.AUTH);
+		setErrorMsg('Подключение отменено. Пожалуйста, авторизуйтесь снова.');
+	};
+
 	// --- Управление избранным ---
 	const handleToggleDeviceFavorite = useCallback((id: string) => {
 		setFavoriteDeviceIds(prevIds => {
-			const newIds = prevIds.includes(id) 
+			const newIds = prevIds.includes(id) 
 				? prevIds.filter(itemId => itemId !== id) // Удаляем
-				: [...prevIds, id];                        // Добавляем
+				: [...prevIds, id];                        // Добавляем
 			setFavorites('favoriteDeviceIds', newIds);
 			return newIds;
 		});
@@ -416,40 +428,73 @@ function App() {
 
   // --- 1. useEffect: Проверка токена при запуске ---
   useEffect(() => {
-    	const checkToken = async () => {
-			setAppState(AppState.LOADING);
-			
-			// Используем IPC для безопасного извлечения токена
-			const storedToken = await yandexApi.getSecureToken(); 
-			
-			// Загружаем состояние автозапуска
-			try {
-				const autostartEnabled = await yandexApi.isAutostartEnabled();
-				setIsAutostartEnabled(autostartEnabled);
-			} catch (error) {
-				console.error('Ошибка при загрузке состояния автозапуска:', error);
-			}
+    const checkToken = async () => {
+      console.log('[App] Starting token check...');
+      setAppState(AppState.LOADING);
+      
+      // Используем IPC для безопасного извлечения токена
+      const storedToken = await yandexApi.getSecureToken(); 
+      console.log('[App] Token retrieved:', !!storedToken);
+      
+      // Загружаем состояние автозапуска
+      try {
+        const autostartEnabled = await yandexApi.isAutostartEnabled();
+        setIsAutostartEnabled(autostartEnabled);
+      } catch (error) {
+        console.error('Ошибка при загрузке состояния автозапуска:', error);
+      }
 
-			// Проверяем наличие обновлений при запуске приложения
-			try {
-				const newUpdateInfo = await checkForUpdates();
-				if (newUpdateInfo) {
-					setUpdateInfo(newUpdateInfo);
-					setShowUpdateNotification(true);
-				}
-			} catch (error) {
-				console.error('Ошибка при проверке обновлений:', error);
-			}
-			
-			if (storedToken) {
-				setToken(storedToken);
-				loadData(storedToken);
-			} else {
-				setAppState(AppState.AUTH);
-			}
-		};
-		checkToken();
-  }, [loadData]); // Зависимость от loadData
+      // Проверяем наличие обновлений при запуске приложения (асинхронно, не блокируем)
+      checkForUpdates().then(newUpdateInfo => {
+        if (newUpdateInfo) {
+          console.log('[App] Update available:', newUpdateInfo.latestVersion);
+          setUpdateInfo(newUpdateInfo);
+          setShowUpdateNotification(true);
+        }
+      }).catch(error => {
+        console.error('Ошибка при проверке обновлений:', error);
+      });
+      
+      if (storedToken) {
+        console.log('[App] Token found, loading user data...');
+        setToken(storedToken);
+        try {
+          const data = await fetchUserInfo(storedToken);
+          console.log('[App] User data loaded successfully');
+          const sortedData = stableSortData(data);
+          setUserData(sortedData);
+          const households = sortedData.households || [];
+          setActiveHouseholdId(prev => {
+            if (prev && households.some(h => h.id === prev)) {
+              return prev;
+            }
+            return households.length > 0 ? households[0].id : null;
+          });
+          console.log('[App] Setting state to DASHBOARD');
+          setAppState(AppState.DASHBOARD);
+        } catch (err) {
+          console.error('[App] Error loading user data:', err);
+          if (err instanceof Error) {
+            setErrorMsg(err.message);
+          } else {
+            setErrorMsg('Ошибка при загрузке данных');
+          }
+          // Если ошибка авторизации, очищаем невалидный токен
+          if (err instanceof Error && (err.message.includes('401') || err.message.includes('403'))) {
+            await yandexApi.deleteSecureToken();
+            setToken(null);
+          }
+          console.log('[App] Setting state to AUTH due to error');
+          setAppState(AppState.AUTH);
+        }
+      } else {
+        console.log('[App] No token found, setting state to AUTH');
+        setAppState(AppState.AUTH);
+      }
+    };
+    
+    checkToken();
+  }, []); // Пустой массив зависимостей - запускаем только один раз при монтировании
 
 	// --- 1.1 useEffect: Слушаем события повторных попыток подключения ---
 	useEffect(() => {
@@ -638,20 +683,27 @@ useEffect(() => {
   // --- Рендеринг в зависимости от состояния приложения ---
 
   // Экран загрузки
-  if (appState === AppState.LOADING) {
-    return (
+  if (appState === AppState.LOADING) {    console.log('[App] Rendering LOADING screen');    return (
       <ThemeProvider>
         <div className="min-h-screen flex items-center justify-center bg-gray-100 dark:bg-gray-900">
-          <div className="flex flex-col items-center gap-4">
+          <div className="flex flex-col items-center gap-6">
             <div className="w-12 h-12 border-4 border-cyan-500 border-t-transparent rounded-full animate-spin"></div>
             <p className="text-slate-600 dark:text-slate-400 animate-pulse">
               {retryInfo ? retryInfo.message : 'Загрузка данных...'}
             </p>
             {retryInfo && (
-              <p className="text-sm text-amber-600 dark:text-amber-400 text-center">
-                Нет соединения. Приложение пытается подключиться...<br/>
-                Попытка {retryInfo.attempt} из {retryInfo.maxAttempts}
-              </p>
+              <>
+                <p className="text-sm text-amber-600 dark:text-amber-400 text-center">
+                  Нет соединения. Приложение пытается подключиться...<br/>
+                  Попытка {retryInfo.attempt} из {retryInfo.maxAttempts}
+                </p>
+                <button
+                  onClick={handleCancelRetry}
+                  className="px-6 py-2 bg-red-600 hover:bg-red-700 dark:bg-red-700 dark:hover:bg-red-800 text-white rounded-lg transition-colors font-medium text-sm"
+                >
+                  Отменить
+                </button>
+              </>
             )}
           </div>
           <NotificationToast />
