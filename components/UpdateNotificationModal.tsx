@@ -50,7 +50,7 @@ export const UpdateNotificationModal: React.FC<UpdateNotificationModalProps> = (
             <p className="text-sm text-slate-600 dark:text-slate-400 mb-2">Новая версия</p>
             <div className="bg-blue-50 dark:bg-blue-500/10 border border-blue-200 dark:border-blue-500/20 rounded-lg p-4">
               <p className="text-lg font-semibold text-blue-900 dark:text-blue-400 mb-2">
-                v{latestVersion}
+                {latestVersion}
               </p>
               <p className="text-xs text-blue-700 dark:text-blue-400">
                 Выпущено: {releaseDate}
