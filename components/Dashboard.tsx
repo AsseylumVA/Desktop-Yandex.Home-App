@@ -10,7 +10,7 @@ import { GroupThermostatSettingsModal } from './GroupThermostatSettingsModal';
 import { FanSettingsModal } from './FanSettingsModal';
 import { GroupFanSettingsModal } from './GroupFanSettingsModal';
 import { InfoModal } from './InfoModal';
-import { LogOut, Home, Layers, MonitorSmartphone, RefreshCw, X, Star, Sun, Moon, ChevronRight, ChevronDown, ChevronUp, Power, Info, Building2, Zap } from 'lucide-react';
+import { LogOut, Home, Layers, MonitorSmartphone, RefreshCw, X, Star, Sun, Moon, ChevronRight, ChevronDown, Power, Info, Building2, Zap, Pencil } from 'lucide-react';
 import { useTheme } from '../contexts/ThemeContext';
 import { isLightDevice, isLightGroup } from '../constants';
 import packageJson from '../package.json';
@@ -127,13 +127,97 @@ export const Dashboard: React.FC<DashboardProps> = ({
     loadCollapseState('dashboard:unassignedDevicesCollapsed', activeHouseholdId, false)
   );
 
-  // Обновляем состояние вкладок при переключении дома
+  // Режим редактирования дашборда
+  const [isEditMode, setIsEditMode] = useState(false);
+  
+  // Состояние скрытых карточек (сохраняется только при выходе из режима редактирования)
+  const [hiddenCardIds, setHiddenCardIds] = useState<Set<string>>(() => {
+    try {
+      const key = getStorageKey('dashboard:hiddenCardIds', activeHouseholdId);
+      const stored = localStorage.getItem(key);
+      return stored ? new Set(JSON.parse(stored)) : new Set();
+    } catch (e) {
+      return new Set();
+    }
+  });
+
+  // Локальное состояние для отслеживания pending скрытий в режиме редактирования
+  const [pendingHiddenIds, setPendingHiddenIds] = useState<Set<string>>(new Set());
+
+  // Сохранение скрытых карточек
+  const saveHiddenCardIds = (householdId: string | null, ids: Set<string>) => {
+    try {
+      const key = getStorageKey('dashboard:hiddenCardIds', householdId);
+      localStorage.setItem(key, JSON.stringify(Array.from(ids)));
+    } catch (e) {
+      console.error('Error saving hidden card ids:', e);
+    }
+  };
+
+  // Переключение режима редактирования
+  const toggleEditMode = () => {
+    if (isEditMode) {
+      // Выходим из режима редактирования - применяем изменения
+      const newHidden = new Set(hiddenCardIds);
+      pendingHiddenIds.forEach(id => {
+        if (newHidden.has(id)) {
+          newHidden.delete(id);
+        } else {
+          newHidden.add(id);
+        }
+      });
+      setHiddenCardIds(newHidden);
+      saveHiddenCardIds(activeHouseholdId, newHidden);
+      setPendingHiddenIds(new Set());
+    }
+    setIsEditMode(prev => !prev);
+  };
+
+  // Переключение видимости карточки (в режиме редактирования работает с pending состоянием)
+  const toggleCardVisibility = (cardId: string) => {
+    const newPending = new Set(pendingHiddenIds);
+    if (newPending.has(cardId)) {
+      newPending.delete(cardId);
+    } else {
+      newPending.add(cardId);
+    }
+    setPendingHiddenIds(newPending);
+  };
+
+  // Получить effective состояние скрытия (в режиме редактирования не скрываем карточки, только показываем состояние)
+  const getEffectiveHidden = (cardId: string): boolean => {
+    if (isEditMode) {
+      return false;
+    }
+    return hiddenCardIds.has(cardId);
+  };
+
+  // Получить состояние для отображения иконки (true = eye-off, false = eye)
+  const getIconHiddenState = (cardId: string): boolean => {
+    if (isEditMode) {
+      if (pendingHiddenIds.has(cardId)) {
+        return true;
+      }
+      return hiddenCardIds.has(cardId);
+    }
+    return hiddenCardIds.has(cardId);
+  };
+
+  // Обновляем состояние при переключении дома
   useEffect(() => {
     setIsScenariosCollapsed(loadCollapseState('dashboard:scenariosCollapsed', activeHouseholdId, false));
     setIsGroupsCollapsed(loadCollapseState('dashboard:groupsCollapsed', activeHouseholdId, false));
     setIsDevicesCollapsed(loadCollapseState('dashboard:devicesCollapsed', activeHouseholdId, false));
     setCollapsedRooms(loadCollapsedRooms(activeHouseholdId));
     setIsUnassignedDevicesCollapsed(loadCollapseState('dashboard:unassignedDevicesCollapsed', activeHouseholdId, false));
+    try {
+      const key = getStorageKey('dashboard:hiddenCardIds', activeHouseholdId);
+      const stored = localStorage.getItem(key);
+      setHiddenCardIds(stored ? new Set(JSON.parse(stored)) : new Set());
+    } catch (e) {
+      setHiddenCardIds(new Set());
+    }
+    setPendingHiddenIds(new Set());
   }, [activeHouseholdId]);
 
   const toggleScenarios = () => {
@@ -305,6 +389,9 @@ export const Dashboard: React.FC<DashboardProps> = ({
     s => favoriteScenarioIds.includes(s.id) && isScenarioInCurrentHome(s)
   );
   const favoriteDevices = devicesForHome.filter(d => favoriteDeviceIds.includes(d.id));
+
+  const visibleFavoriteScenarios = favoriteScenarios.filter(s => !getEffectiveHidden(`scenario_${s.id}`));
+  const visibleFavoriteDevices = favoriteDevices.filter(d => !getEffectiveHidden(`device_${d.id}`));
 
   const hasFavorites = favoriteScenarios.length > 0 || favoriteDevices.length > 0;
 
@@ -572,14 +659,25 @@ export const Dashboard: React.FC<DashboardProps> = ({
                 <span className="w-2 h-2 rounded-full bg-green-500 animate-pulse"></span>
                 <span className="text-xs text-slate-600 dark:text-slate-400 font-medium">Онлайн</span>
              </div>
-             <button
-                onClick={onToggleAutostart}
-                className={`p-2 hover:bg-gray-200 dark:hover:bg-slate-700 rounded-lg transition-colors ${
-                  isAutostartEnabled 
-                    ? 'text-purple-600 dark:text-primary bg-purple-50 dark:bg-primary/20' 
-                    : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
-                }`}
-                title={isAutostartEnabled ? 'Автозапуск включен. Нажмите, чтобы выключить' : 'Автозапуск выключен. Нажмите, чтобы включить'}
+<button
+                 onClick={toggleEditMode}
+                 className={`p-2 hover:bg-gray-200 dark:hover:bg-slate-700 rounded-lg transition-colors ${
+                   isEditMode 
+                     ? 'text-purple-600 dark:text-primary bg-purple-50 dark:bg-primary/20' 
+                     : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
+                 }`}
+                 title={isEditMode ? 'Выйти из режима редактирования' : 'Редактировать дашборд'}
+             >
+                 {isEditMode ? <Pencil className={`w-5 h-5`} /> : <Pencil className={`w-5 h-5`} />}
+            </button>
+            <button
+                 onClick={onToggleAutostart}
+                 className={`p-2 hover:bg-gray-200 dark:hover:bg-slate-700 rounded-lg transition-colors ${
+                   isAutostartEnabled 
+                     ? 'text-purple-600 dark:text-primary bg-purple-50 dark:bg-primary/20' 
+                     : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
+                 }`}
+                 title={isAutostartEnabled ? 'Автозапуск включен. Нажмите, чтобы выключить' : 'Автозапуск выключен. Нажмите, чтобы включить'}
             >
                 <Power className={`w-5 h-5`} />
             </button>
@@ -657,46 +755,62 @@ export const Dashboard: React.FC<DashboardProps> = ({
 				</div>
 
 				{/* Избранные сценарии */}
-				{favoriteScenarios.length > 0 && (
+				{visibleFavoriteScenarios.length > 0 && (
 					<>
-						<h3 className="text-lg font-medium text-slate-700 dark:text-slate-300 mt-6 mb-3">Сценарии ({favoriteScenarios.length})</h3>
+						<h3 className="text-lg font-medium text-slate-700 dark:text-slate-300 mt-6 mb-3">Сценарии ({visibleFavoriteScenarios.length})</h3>
 						<div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-4">
-							{favoriteScenarios.map(scenario => (
-								<ScenarioCard 
-									key={scenario.id} 
-									scenario={scenario} 
-									onExecute={onExecuteScenario} 
-									isFavorite={true} 
-									onToggleFavorite={onToggleScenarioFavorite}
-								/>
-							))}
+							{visibleFavoriteScenarios.map(scenario => {
+								const cardId = `scenario_${scenario.id}`;
+								const isHidden = getEffectiveHidden(cardId);
+								return (
+									<ScenarioCard 
+										key={scenario.id} 
+										scenario={scenario} 
+										onExecute={onExecuteScenario} 
+										isFavorite={true} 
+										onToggleFavorite={onToggleScenarioFavorite}
+										isEditMode={isEditMode}
+										isHidden={isHidden}
+										iconHiddenState={getIconHiddenState(cardId)}
+										onToggleVisibility={() => toggleCardVisibility(cardId)}
+									/>
+								);
+							})}
 						</div>
 					</>
 				)}
 
 				{/* Избранные устройства */}
-				{favoriteDevices.length > 0 && (
+				{visibleFavoriteDevices.length > 0 && (
 					<>
-						<h3 className="text-lg font-medium text-slate-700 dark:text-slate-300 mt-6 mb-3">Устройства ({favoriteDevices.length})</h3>
+						<h3 className="text-lg font-medium text-slate-700 dark:text-slate-300 mt-6 mb-3">Устройства ({visibleFavoriteDevices.length})</h3>
 						<div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-4">
-							{favoriteDevices.map(device => (
-								<DeviceCard 
-									key={device.id} 
-									device={device} 
-									onToggle={onToggleDevice} 
-									isFavorite={true} 
-									onToggleFavorite={onToggleDeviceFavorite}
-									onOpenSettings={(dev) => {
-										if (isLightDevice(dev.type)) {
-											handleOpenLightSettings(dev);
-										} else if (dev.type === 'devices.types.ventilation.fan') {
-											handleOpenFanSettings(dev);
-										} else {
-											handleOpenThermostatSettings(dev);
-										}
-									}}
-								/>
-							))}
+							{visibleFavoriteDevices.map(device => {
+								const cardId = `device_${device.id}`;
+								const isHidden = getEffectiveHidden(cardId);
+								return (
+									<DeviceCard 
+										key={device.id} 
+										device={device} 
+										onToggle={onToggleDevice} 
+										isFavorite={true} 
+										onToggleFavorite={onToggleDeviceFavorite}
+										onOpenSettings={(dev) => {
+											if (isLightDevice(dev.type)) {
+												handleOpenLightSettings(dev);
+											} else if (dev.type === 'devices.types.ventilation.fan') {
+												handleOpenFanSettings(dev);
+											} else {
+												handleOpenThermostatSettings(dev);
+											}
+										}}
+										isEditMode={isEditMode}
+										isHidden={isHidden}
+										iconHiddenState={getIconHiddenState(cardId)}
+										onToggleVisibility={() => toggleCardVisibility(cardId)}
+									/>
+								);
+							})}
 						</div>
 					</>
 				)}
@@ -719,7 +833,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
               <h2 className="text-2xl font-bold text-slate-900 dark:text-slate-100">Сценарии</h2>
             </button>
             <span className="text-sm text-slate-600 dark:text-secondary bg-white dark:bg-surface px-3 py-1 rounded-full border border-gray-200 dark:border-white/5">
-              {activeScenarios.length} активных
+              {activeScenarios.filter(s => !getEffectiveHidden(`scenario_${s.id}`)).length} активных
             </span>
           </div>
 
@@ -731,15 +845,24 @@ export const Dashboard: React.FC<DashboardProps> = ({
                  </div>
               ) : (
                 <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-4">
-                  {activeScenarios.map((scenario: YandexScenario) => (
-                    <ScenarioCard 
-                      key={scenario.id} 
-                      scenario={scenario} 
-                      onExecute={onExecuteScenario} 
-                      isFavorite={favoriteScenarioIds.includes(scenario.id)}
-                      onToggleFavorite={onToggleScenarioFavorite}
-                    />
-                  ))}
+                  {activeScenarios.map((scenario: YandexScenario) => {
+                    const cardId = `scenario_${scenario.id}`;
+                    const isHidden = getEffectiveHidden(cardId);
+                    if (!isEditMode && isHidden) return null;
+                    return (
+                      <ScenarioCard 
+                        key={scenario.id} 
+                        scenario={scenario} 
+                        onExecute={onExecuteScenario} 
+                        isFavorite={favoriteScenarioIds.includes(scenario.id)}
+                        onToggleFavorite={onToggleScenarioFavorite}
+                        isEditMode={isEditMode}
+                        isHidden={isHidden}
+                        iconHiddenState={getIconHiddenState(cardId)}
+                        onToggleVisibility={() => toggleCardVisibility(cardId)}
+                      />
+                    );
+                  })}
                 </div>
               )}
             </>
@@ -792,7 +915,6 @@ export const Dashboard: React.FC<DashboardProps> = ({
                         }
                       }}
                       onOpenGroupSettings={(group) => {
-                        // Check if group contains light, thermostat, or fan devices
                         const groupDevices = devicesForHome.filter(d => group.devices.includes(d.id));
                         const isLightGroupCheck = isLightGroup(groupDevices);
                         const isThermostatGroup = groupDevices.length > 0 && groupDevices.every(d => 
@@ -808,6 +930,10 @@ export const Dashboard: React.FC<DashboardProps> = ({
                           handleOpenGroupFanSettings(group);
                         }
                       }}
+                      isEditMode={isEditMode}
+                      getEffectiveHidden={getEffectiveHidden}
+                      getIconHiddenState={getIconHiddenState}
+                      onToggleDeviceVisibility={toggleCardVisibility}
                     />
                   ))}
                 </div>
@@ -831,34 +957,47 @@ export const Dashboard: React.FC<DashboardProps> = ({
                 <h2 className="text-2xl font-bold text-slate-900 dark:text-slate-100">Устройства</h2>
               </button>
               <span className="text-sm text-slate-600 dark:text-secondary bg-white dark:bg-surface px-3 py-1 rounded-full border border-gray-200 dark:border-white/5">
-              {devicesForHome.length} устройств
+              {devicesForHome.filter(d => !getEffectiveHidden(`device_${d.id}`)).length} устройств
               </span>
             </div>
             
             {!isDevicesCollapsed && (
               <>
-                {roomsForHome.length === 0 && devicesForHome.length > 0 && (
-                     <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-4">
-                        {devicesForHome.map(device => (
-                            <DeviceCard 
-                            key={device.id} 
-                            device={device} 
-                            onToggle={onToggleDevice} 
-                            isFavorite={favoriteDeviceIds.includes(device.id)} 
-                            onToggleFavorite={onToggleDeviceFavorite}
-                            onOpenSettings={(dev) => {
-                              if (isLightDevice(dev.type)) {
-                                handleOpenLightSettings(dev);
-                              } else if (dev.type === 'devices.types.ventilation.fan') {
-                                handleOpenFanSettings(dev);
-                              } else {
-                                handleOpenThermostatSettings(dev);
-                              }
-                            }}
-                            />
-                        ))}
-                     </div>
-                )}
+{roomsForHome.length === 0 && devicesForHome.length > 0 && (
+                     (() => {
+                       const visibleDevices = devicesForHome.filter(d => !getEffectiveHidden(`device_${d.id}`));
+                       return visibleDevices.length > 0 ? (
+                        <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-4">
+                           {visibleDevices.map(device => {
+                             const cardId = `device_${device.id}`;
+                             const isHidden = getEffectiveHidden(cardId);
+                             return (
+                               <DeviceCard 
+                               key={device.id} 
+                               device={device} 
+                               onToggle={onToggleDevice} 
+                               isFavorite={favoriteDeviceIds.includes(device.id)} 
+                               onToggleFavorite={onToggleDeviceFavorite}
+                               onOpenSettings={(dev) => {
+                                 if (isLightDevice(dev.type)) {
+                                   handleOpenLightSettings(dev);
+                                 } else if (dev.type === 'devices.types.ventilation.fan') {
+                                   handleOpenFanSettings(dev);
+                                 } else {
+                                   handleOpenThermostatSettings(dev);
+                                 }
+}}
+                                isEditMode={isEditMode}
+                                isHidden={isHidden}
+                                iconHiddenState={getIconHiddenState(cardId)}
+                                onToggleVisibility={() => toggleCardVisibility(cardId)}
+                                />
+                              );
+                            })}
+                         </div>
+                        ) : null;
+                      })()
+                    )}
 
                 <div className="space-y-8">
                     {roomsForHome.map(room => {
@@ -883,26 +1022,36 @@ export const Dashboard: React.FC<DashboardProps> = ({
                                   </h3>
                                 </button>
                                 {!isRoomCollapsed && (
-                                  <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-4">
-                                      {roomDevices.map(dev => (
-                                          <DeviceCard 
-                                          key={dev.id} 
-                                          device={dev} 
-                                          onToggle={onToggleDevice} 
-                                          isFavorite={favoriteDeviceIds.includes(dev.id)} 
-                                          onToggleFavorite={onToggleDeviceFavorite}
-                                          onOpenSettings={(device) => {
-                                            if (isLightDevice(device.type)) {
-                                              handleOpenLightSettings(device);
-                                            } else if (device.type === 'devices.types.ventilation.fan') {
-                                              handleOpenFanSettings(device);
-                                            } else {
-                                              handleOpenThermostatSettings(device);
-                                            }
-                                          }}
-                                          />
-                                      ))}
-                                  </div>
+<div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-4">
+                                      {roomDevices
+                                        .filter(dev => !getEffectiveHidden(`device_${dev.id}`))
+                                        .map(dev => {
+                                          const cardId = `device_${dev.id}`;
+                                          const isHidden = getEffectiveHidden(cardId);
+                                          return (
+                                            <DeviceCard 
+                                            key={dev.id} 
+                                            device={dev} 
+                                            onToggle={onToggleDevice} 
+                                            isFavorite={favoriteDeviceIds.includes(dev.id)} 
+                                            onToggleFavorite={onToggleDeviceFavorite}
+                                            onOpenSettings={(device) => {
+                                              if (isLightDevice(device.type)) {
+                                                handleOpenLightSettings(device);
+                                              } else if (device.type === 'devices.types.ventilation.fan') {
+                                                handleOpenFanSettings(device);
+                                              } else {
+                                                handleOpenThermostatSettings(device);
+                                              }
+                                            }}
+                                            isEditMode={isEditMode}
+                                            isHidden={isHidden}
+                                            iconHiddenState={getIconHiddenState(cardId)}
+                                            onToggleVisibility={() => toggleCardVisibility(cardId)}
+                                            />
+                                          );
+                                        })}
+                                    </div>
                                 )}
                             </div>
                         )
@@ -932,33 +1081,46 @@ export const Dashboard: React.FC<DashboardProps> = ({
                               </h3>
                             </button>
                             {!isUnassignedDevicesCollapsed && (
-                              <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-4">
-                                  {unassignedDevices.map(dev => (
-                                      <DeviceCard 
-                                      key={dev.id} 
-                                      device={dev} 
-                                      onToggle={onToggleDevice} 
-                                      isFavorite={favoriteDeviceIds.includes(dev.id)} 
-                                      onToggleFavorite={onToggleDeviceFavorite}
-                                      onOpenSettings={(device) => {
-                                        if (isLightDevice(device.type)) {
-                                          handleOpenLightSettings(device);
-                                        } else if (device.type === 'devices.types.ventilation.fan') {
-                                          handleOpenFanSettings(device);
-                                        } else {
-                                          handleOpenThermostatSettings(device);
-                                        }
-                                      }}
-                                      />
-                                  ))}
-                              </div>
+                              (() => {
+                                const visibleUnassignedDevices = unassignedDevices.filter(dev => !getEffectiveHidden(`device_${dev.id}`));
+                                return visibleUnassignedDevices.length > 0 ? (
+                                  <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-4">
+                                    {visibleUnassignedDevices.map(dev => {
+                                      const cardId = `device_${dev.id}`;
+                                      const isHidden = getEffectiveHidden(cardId);
+return (
+                                        <DeviceCard 
+                                        key={dev.id} 
+                                        device={dev} 
+                                        onToggle={onToggleDevice} 
+                                        isFavorite={favoriteDeviceIds.includes(dev.id)} 
+                                        onToggleFavorite={onToggleDeviceFavorite}
+                                        onOpenSettings={(device) => {
+                                          if (isLightDevice(device.type)) {
+                                            handleOpenLightSettings(device);
+                                          } else if (device.type === 'devices.types.ventilation.fan') {
+                                            handleOpenFanSettings(device);
+                                          } else {
+                                            handleOpenThermostatSettings(device);
+                                          }
+                                        }}
+                                        isEditMode={isEditMode}
+                                        isHidden={isHidden}
+                                        iconHiddenState={getIconHiddenState(cardId)}
+                                        onToggleVisibility={() => toggleCardVisibility(cardId)}
+                                        />
+                                      );
+                                    })}
+                                  </div>
+                                ) : null;
+                              })()
                             )}
                          </div>
-                     );
-                 })()}
-              </>
-            )}
-        </section>
+                      );
+                  })()}
+               </>
+             )}
+         </section>
 
       </main>
 	  

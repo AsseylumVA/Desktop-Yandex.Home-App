@@ -1,16 +1,20 @@
 import React, { useState } from 'react';
 import { getIconForScenario } from '../constants';
 import { YandexScenario } from '../types';
-import { Loader2, CheckCircle2, Star } from 'lucide-react';
+import { Loader2, CheckCircle2, Star, Eye, EyeOff } from 'lucide-react';
 
 interface ScenarioCardProps {
   scenario: YandexScenario;
   onExecute: (id: string) => Promise<void>;
   isFavorite: boolean;
   onToggleFavorite: (id: string) => void;
+  isEditMode?: boolean;
+  isHidden?: boolean;
+  iconHiddenState?: boolean;
+  onToggleVisibility?: (id: string) => void;
 }
 
-export const ScenarioCard: React.FC<ScenarioCardProps> = ({ scenario, onExecute, isFavorite, onToggleFavorite }) => {
+export const ScenarioCard: React.FC<ScenarioCardProps> = ({ scenario, onExecute, isFavorite, onToggleFavorite, isEditMode = false, isHidden = false, iconHiddenState = false, onToggleVisibility }) => {
   const [loading, setLoading] = useState(false);
   const [justExecuted, setJustExecuted] = useState(false);
 
@@ -55,16 +59,30 @@ export const ScenarioCard: React.FC<ScenarioCardProps> = ({ scenario, onExecute,
 	
 		<div
           onClick={(e) => {
-              e.stopPropagation(); // Важно: предотвращаем запуск сценария
-              onToggleFavorite(scenario.id);
+              e.stopPropagation();
+              if (isEditMode && onToggleVisibility) {
+                onToggleVisibility(`scenario_${scenario.id}`);
+              } else {
+                onToggleFavorite(scenario.id);
+              }
           }}
           className={`
               absolute top-3 right-3 z-20 p-1 rounded-full transition-all duration-200 cursor-pointer
-              ${isFavorite ? 'text-yellow-500 dark:text-accent bg-white/80 dark:bg-surface/80 hover:bg-white dark:hover:bg-surface' : 'text-gray-400 dark:text-slate-500 hover:text-yellow-500 dark:hover:text-accent opacity-0 group-hover:opacity-100'}
+              ${isEditMode && onToggleVisibility 
+                ? 'text-gray-400 dark:text-slate-500 hover:text-slate-900 dark:hover:text-white' 
+                : isFavorite 
+                  ? 'text-yellow-500 dark:text-accent bg-white/80 dark:bg-surface/80 hover:bg-white dark:hover:bg-surface' 
+                  : 'text-gray-400 dark:text-slate-500 hover:text-yellow-500 dark:hover:text-accent opacity-0 group-hover:opacity-100'}
           `}
-          title={isFavorite ? 'Убрать из избранного' : 'Добавить в избранное'}
+          title={isEditMode && onToggleVisibility 
+            ? (iconHiddenState ? 'Показать на дашборде' : 'Скрыть с дашборда') 
+            : (isFavorite ? 'Убрать из избранного' : 'Добавить в избранное')}
       >
-          <Star className="w-4 h-4 fill-current" />
+          {isEditMode && onToggleVisibility ? (
+            iconHiddenState ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />
+          ) : (
+            <Star className="w-4 h-4 fill-current" />
+          )}
       </div>
 	
       {/* Background Gradient on Hover */}

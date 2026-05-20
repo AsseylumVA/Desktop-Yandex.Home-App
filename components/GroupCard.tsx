@@ -13,6 +13,10 @@ interface GroupCardProps {
   onToggleDeviceFavorite: (id: string) => void;
   onOpenSettings?: (device: YandexDevice) => void;
   onOpenGroupSettings?: (group: YandexGroup) => void;
+  isEditMode?: boolean;
+  getEffectiveHidden?: (cardId: string) => boolean;
+  getIconHiddenState?: (cardId: string) => boolean;
+  onToggleDeviceVisibility?: (id: string) => void;
 }
 
 export const GroupCard: React.FC<GroupCardProps> = ({
@@ -24,6 +28,10 @@ export const GroupCard: React.FC<GroupCardProps> = ({
   onToggleDeviceFavorite,
   onOpenSettings,
   onOpenGroupSettings,
+  isEditMode = false,
+  getEffectiveHidden = (id) => false,
+  getIconHiddenState = (id) => false,
+  onToggleDeviceVisibility,
 }) => {
   const [loading, setLoading] = useState(false);
   const [isCollapsed, setIsCollapsed] = useState(false);
@@ -160,18 +168,35 @@ export const GroupCard: React.FC<GroupCardProps> = ({
 
       {/* Список устройств в группе */}
       {!isCollapsed && groupDevices.length > 0 && (
-        <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-4">
-          {groupDevices.map(device => (
-            <DeviceCard
-              key={device.id}
-              device={device}
-              onToggle={onToggleDevice}
-              isFavorite={favoriteDeviceIds.includes(device.id)}
-              onToggleFavorite={onToggleDeviceFavorite}
-              onOpenSettings={onOpenSettings}
-            />
-          ))}
-        </div>
+        (() => {
+          const visibleGroupDevices = groupDevices.filter(d => !getEffectiveHidden(`device_${d.id}`));
+          return visibleGroupDevices.length > 0 ? (
+            <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-4">
+              {visibleGroupDevices.map(device => {
+                const cardId = `device_${device.id}`;
+                const isHidden = getEffectiveHidden(cardId);
+                return (
+                  <DeviceCard
+                    key={device.id}
+                    device={device}
+                    onToggle={onToggleDevice}
+                    isFavorite={favoriteDeviceIds.includes(device.id)}
+                    onToggleFavorite={onToggleDeviceFavorite}
+                    onOpenSettings={onOpenSettings}
+                    isEditMode={isEditMode}
+                    isHidden={isHidden}
+                    iconHiddenState={getIconHiddenState(cardId)}
+                    onToggleVisibility={() => onToggleDeviceVisibility?.(cardId)}
+                  />
+                );
+              })}
+            </div>
+          ) : (
+            <p className="text-sm text-slate-500 dark:text-slate-400">
+              Все устройства в этой группе скрыты
+            </p>
+          );
+        })()
       )}
 
       {/* Если нет устройств */}

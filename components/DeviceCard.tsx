@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { YandexDevice } from '../types';
 import { getIconForDevice, localizeUnit } from '../constants';
-import { Loader2, Power, Star, Settings } from 'lucide-react';
+import { Loader2, Power, Star, Settings, Eye, EyeOff } from 'lucide-react';
 
 interface DeviceCardProps {
   device: YandexDevice;
@@ -9,9 +9,13 @@ interface DeviceCardProps {
   isFavorite: boolean;
   onToggleFavorite: (id: string) => void;
   onOpenSettings?: (device: YandexDevice) => void;
+  isEditMode?: boolean;
+  isHidden?: boolean;
+  iconHiddenState?: boolean;
+  onToggleVisibility?: (id: string) => void;
 }
 
-export const DeviceCard: React.FC<DeviceCardProps> = ({ device, onToggle, isFavorite, onToggleFavorite, onOpenSettings }) => {
+export const DeviceCard: React.FC<DeviceCardProps> = ({ device, onToggle, isFavorite, onToggleFavorite, onOpenSettings, isEditMode = false, isHidden = false, iconHiddenState = false, onToggleVisibility }) => {
   const [loading, setLoading] = useState(false);
 
   // Проверяем, является ли устройство кондиционером или термостатом
@@ -171,6 +175,20 @@ export const DeviceCard: React.FC<DeviceCardProps> = ({ device, onToggle, isFavo
     >
 	
 	<div className="absolute top-3 right-3 z-20 flex items-center gap-2">
+      {/* Visibility toggle button in edit mode */}
+      {isEditMode && onToggleVisibility && (
+        <div
+          onClick={(e) => {
+              e.stopPropagation();
+              onToggleVisibility(`device_${device.id}`);
+          }}
+          className="p-1 rounded-full transition-all duration-200 cursor-pointer text-gray-400 dark:text-slate-500 hover:text-slate-900 dark:hover:text-white"
+          title={iconHiddenState ? 'Показать на дашборде' : 'Скрыть с дашборда'}
+        >
+          {iconHiddenState ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+        </div>
+      )}
+
       {/* Settings button for thermostat, light and fan */}
       {(isThermostat || isLight || isFan) && onOpenSettings && (
         <div
