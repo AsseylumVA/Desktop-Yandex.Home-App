@@ -157,12 +157,53 @@ export const GroupLightSettingsModal: React.FC<GroupLightSettingsModalProps> = (
   return (
     <div className="fixed inset-0 z-[100] bg-black/50 dark:bg-black/70 flex items-center justify-center backdrop-blur-sm">
       <style>{`
-        input[type="range"]::-webkit-slider-runnable-track {
+        /* Temperature slider gradient - left (cold) to right (warm) */
+        input[type="range"].temp-slider::-webkit-slider-runnable-track {
+          background: linear-gradient(to right, #4299e1 0%, #63b3ed 50%, #ed8936 100%);
+          height: 8px;
+          border-radius: 4px;
+        }
+        input[type="range"].temp-slider::-webkit-slider-thumb {
+          -webkit-appearance: none;
+          appearance: none;
+          width: 16px;
+          height: 16px;
+          border-radius: 50%;
+          background: #fff;
+          border: 2px solid #475569;
+          cursor: pointer;
+          margin-top: -4px;
+          box-shadow: 0 1px 3px rgba(0,0,0,0.3);
+        }
+        input[type="range"].temp-slider::-moz-range-track {
+          background: linear-gradient(to right, #2c5282 0%, #4299e1 50%, #dd6b20 100%);
+          height: 8px;
+          border-radius: 4px;
+          border: none;
+        }
+        input[type="range"].temp-slider::-moz-range-thumb {
+          width: 16px;
+          height: 16px;
+          border-radius: 50%;
+          background: #fff;
+          cursor: pointer;
+          border: 2px solid #475569;
+          margin-top: -4px;
+          box-shadow: 0 1px 3px rgba(0,0,0,0.3);
+        }
+        .dark input[type="range"].temp-slider::-webkit-slider-runnable-track {
+          background: linear-gradient(to right, #2c5282 0%, #4299e1 50%, #dd6b20 100%);
+        }
+        .dark input[type="range"].temp-slider::-moz-range-track {
+          background: linear-gradient(to right, #2c5282 0%, #4299e1 50%, #dd6b20 100%);
+        }
+        /* Brightness slider - neutral gradient */
+        input[type="range"].brightness-slider::-webkit-slider-runnable-track {
           background: linear-gradient(to right, #e2e8f0, #cbd5e1);
           height: 8px;
           border-radius: 4px;
         }
-        input[type="range"]::-webkit-slider-thumb {
+        input[type="range"].brightness-slider::-webkit-slider-thumb {
           -webkit-appearance: none;
           appearance: none;
           width: 16px;
@@ -172,13 +213,13 @@ export const GroupLightSettingsModal: React.FC<GroupLightSettingsModalProps> = (
           cursor: pointer;
           margin-top: -4px;
         }
-        input[type="range"]::-moz-range-track {
+        input[type="range"].brightness-slider::-moz-range-track {
           background: linear-gradient(to right, #e2e8f0, #cbd5e1);
           height: 8px;
           border-radius: 4px;
           border: none;
         }
-        input[type="range"]::-moz-range-thumb {
+        input[type="range"].brightness-slider::-moz-range-thumb {
           width: 16px;
           height: 16px;
           border-radius: 50%;
@@ -187,10 +228,10 @@ export const GroupLightSettingsModal: React.FC<GroupLightSettingsModalProps> = (
           border: none;
           margin-top: -4px;
         }
-        .dark input[type="range"]::-webkit-slider-runnable-track {
+        .dark input[type="range"].brightness-slider::-webkit-slider-runnable-track {
           background: linear-gradient(to right, #475569, #64748b);
         }
-        .dark input[type="range"]::-moz-range-track {
+        .dark input[type="range"].brightness-slider::-moz-range-track {
           background: linear-gradient(to right, #475569, #64748b);
         }
       `}</style>
@@ -324,15 +365,15 @@ export const GroupLightSettingsModal: React.FC<GroupLightSettingsModalProps> = (
                   step={temperatureKRange.precision}
                   value={temperature_k ?? temperatureKRange.min}
                   onChange={e => setTemperature_k(Number(e.target.value))}
-                  className="flex-1 accent-orange-500 dark:accent-orange-400"
+                  className="flex-1 accent-orange-500 dark:accent-orange-400 temp-slider"
                 />
                 <div className="text-xs text-slate-600 dark:text-slate-400 w-12 text-right">
                   Тепло
                 </div>
               </div>
               <div className="flex justify-between text-xs text-slate-500 dark:text-slate-400 mt-2">
-                <span>{temperatureKRange.min}K</span>
                 <span>{temperatureKRange.max}K</span>
+                <span>{temperatureKRange.min}K</span>
               </div>
             </div>
           )}
