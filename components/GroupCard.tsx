@@ -94,7 +94,7 @@ export const GroupCard: React.FC<GroupCardProps> = ({
   };
 
   return (
-    <div className="bg-white dark:bg-surface border border-gray-200 dark:border-white/5 rounded-2xl p-6">
+    <div className={`bg-white dark:bg-surface border border-gray-200 dark:border-white/5 rounded-2xl p-6 ${isEditMode && getIconHiddenState(`group_${group.id}`) ? 'opacity-50 grayscale' : ''}`}>
       {/* Заголовок группы с кнопкой переключения */}
       <div className="flex items-center justify-between mb-4">
         <div className="flex items-center gap-3 flex-1">

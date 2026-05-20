@@ -171,6 +171,7 @@ export const DeviceCard: React.FC<DeviceCardProps> = ({ device, onToggle, isFavo
               : 'bg-white dark:bg-surface border-gray-200 dark:border-white/5 hover:bg-gray-50 dark:hover:bg-slate-700/50'
             : 'bg-white dark:bg-surface border-gray-200 dark:border-white/5'
         }
+        ${isEditMode && iconHiddenState ? 'opacity-50 grayscale' : ''}
       `}
     >
 	

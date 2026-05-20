@@ -141,8 +141,9 @@ export const Dashboard: React.FC<DashboardProps> = ({
     }
   });
 
-  // Локальное состояние для отслеживания pending скрытий в режиме редактирования
-  const [pendingHiddenIds, setPendingHiddenIds] = useState<Set<string>>(new Set());
+  // Локальное состояние для отслеживания изменений видимости в режиме редактирования
+  // Map<cardId, boolean> - true = скрыть, false = показать (относительно изначального состояния)
+  const [visibilityChanges, setVisibilityChanges] = useState<Map<string, boolean>>(new Map());
 
   // Сохранение скрытых карточек
   const saveHiddenCardIds = (householdId: string | null, ids: Set<string>) => {
@@ -158,30 +159,38 @@ export const Dashboard: React.FC<DashboardProps> = ({
   const toggleEditMode = () => {
     if (isEditMode) {
       // Выходим из режима редактирования - применяем изменения
-      const newHidden = new Set(hiddenCardIds);
-      pendingHiddenIds.forEach(id => {
-        if (newHidden.has(id)) {
-          newHidden.delete(id);
+      const newHidden: Set<string> = new Set(hiddenCardIds);
+      visibilityChanges.forEach((shouldHide, cardId) => {
+        if (shouldHide) {
+          newHidden.add(cardId);
         } else {
-          newHidden.add(id);
+          newHidden.delete(cardId);
         }
       });
       setHiddenCardIds(newHidden);
       saveHiddenCardIds(activeHouseholdId, newHidden);
-      setPendingHiddenIds(new Set());
+      setVisibilityChanges(new Map());
     }
     setIsEditMode(prev => !prev);
   };
 
-  // Переключение видимости карточки (в режиме редактирования работает с pending состоянием)
-  const toggleCardVisibility = (cardId: string) => {
-    const newPending = new Set(pendingHiddenIds);
-    if (newPending.has(cardId)) {
-      newPending.delete(cardId);
-    } else {
-      newPending.add(cardId);
+  // Вычислить effective состояние с учётом изменений
+  const getEffectiveWithChanges = (cardId: string): boolean => {
+    const baseHidden = hiddenCardIds.has(cardId);
+    if (visibilityChanges.has(cardId)) {
+      return visibilityChanges.get(cardId)!;
     }
-    setPendingHiddenIds(newPending);
+    return baseHidden;
+  };
+
+  // Переключение видимости карточки (в режиме редактирования работает с changes состоянием)
+  const toggleCardVisibility = (cardId: string) => {
+    const newChanges = new Map(visibilityChanges);
+    const currentEffective = getEffectiveWithChanges(cardId);
+    
+    // Переключаем состояние
+    newChanges.set(cardId, !currentEffective);
+    setVisibilityChanges(newChanges);
   };
 
   // Получить effective состояние скрытия (в режиме редактирования не скрываем карточки, только показываем состояние)
@@ -195,10 +204,12 @@ export const Dashboard: React.FC<DashboardProps> = ({
   // Получить состояние для отображения иконки (true = eye-off, false = eye)
   const getIconHiddenState = (cardId: string): boolean => {
     if (isEditMode) {
-      if (pendingHiddenIds.has(cardId)) {
-        return true;
+      // Применяем изменения к текущему состоянию
+      const baseHidden = hiddenCardIds.has(cardId);
+      if (visibilityChanges.has(cardId)) {
+        return visibilityChanges.get(cardId)!;
       }
-      return hiddenCardIds.has(cardId);
+      return baseHidden;
     }
     return hiddenCardIds.has(cardId);
   };
@@ -217,7 +228,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
     } catch (e) {
       setHiddenCardIds(new Set());
     }
-    setPendingHiddenIds(new Set());
+    setVisibilityChanges(new Map());
   }, [activeHouseholdId]);
 
   const toggleScenarios = () => {

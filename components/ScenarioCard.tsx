@@ -54,6 +54,7 @@ export const ScenarioCard: React.FC<ScenarioCardProps> = ({ scenario, onExecute,
         min-h-[160px] w-full
         ${loading ? 'cursor-wait opacity-80' : 'cursor-pointer'}
         ${justExecuted ? 'ring-2 ring-green-500 bg-green-50 dark:bg-green-900/10' : ''}
+        ${isEditMode && iconHiddenState ? 'opacity-50 grayscale' : ''}
       `}
     >
 	
