@@ -91,7 +91,10 @@
       "icon": "resources/icon.png",
       "maintainer": "История Одного Геймера <gamecuts0412@gmail.com>",
       "description": "Yandex Smart Home Control Application",
-      "executableName": "yandex-smart-home-control"
+      "executableName": "yandex-smart-home-control",
+      "desktop": {
+        "StartupWMClass": "yandex-smart-home-control"
+      }
     }
   }
 }
