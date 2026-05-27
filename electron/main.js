@@ -240,68 +240,62 @@ if (!gotTheLock) {
         
         ipcMain.handle('yandex-api:fetchUserInfo', async (event, token) => {
             try {
-                return await yandexApi.fetchUserInfo(token, (attempt, maxAttempts) => {
-                    // Отправляем событие о повторной попытке подключения в React приложение
-                    if (mainWindow && !mainWindow.isDestroyed()) {
-                        mainWindow.webContents.send('yandex-api:retry-attempt', {
-                            attempt,
-                            maxAttempts,
-                            message: `Попытка повторного подключения ${attempt} из ${maxAttempts}...`
-                        });
-                    }
-                    console.log(`Повторная попытка ${attempt}/${maxAttempts}...`);
-                });
+                return await yandexApi.fetchUserInfo(token, makeRetryCallback('fetchUserInfo'));
             } catch (error) {
-                throw new Error(error.message); 
+                throw new Error(error.message, { cause: error });
             }
         });
 
+        const makeRetryCallback = (action) => {
+            return (attempt, maxAttempts) => {
+                if (mainWindow && !mainWindow.isDestroyed()) {
+                    mainWindow.webContents.send('yandex-api:retry-attempt', {
+                        attempt,
+                        maxAttempts,
+                        message: `Попытка повторного подключения ${attempt} из ${maxAttempts}...`
+                    });
+                }
+                console.log(`${action}: повторная попытка ${attempt}/${maxAttempts}...`);
+            };
+        };
+
         ipcMain.handle('yandex-api:executeScenario', async (event, token, scenarioId) => {
             try {
-                return await yandexApi.executeScenario(token, scenarioId);
+                return await yandexApi.executeScenario(token, scenarioId, makeRetryCallback('executeScenario'));
             } catch (error) {
-                throw new Error(error.message);
+                throw new Error(error.message, { cause: error });
             }
         });
 
         ipcMain.handle('yandex-api:toggleDevice', async (event, token, deviceId, newState) => {
             try {
-                return await yandexApi.toggleDevice(token, deviceId, newState);
+                return await yandexApi.toggleDevice(token, deviceId, newState, makeRetryCallback('toggleDevice'));
             } catch (error) {
-                throw new Error(error.message);
+                throw new Error(error.message, { cause: error });
             }
         });
 
         ipcMain.handle('yandex-api:setDeviceMode', async (event, token, deviceId, modeActions, turnOn) => {
             try {
-                return await yandexApi.setDeviceMode(token, deviceId, modeActions, turnOn);
+                return await yandexApi.setDeviceMode(token, deviceId, modeActions, turnOn, makeRetryCallback('setDeviceMode'));
             } catch (error) {
-                throw new Error(error.message);
+                throw new Error(error.message, { cause: error });
             }
         });
 
-        ipcMain.handle('yandex-api:toggleGroup', async (event, token, groupId, newState) => {
+        ipcMain.handle('yandex-api:toggleGroup', async (event, token, groupId, deviceIds, newState) => {
             try {
-                return await yandexApi.toggleGroup(token, groupId, newState);
+                return await yandexApi.toggleGroup(token, groupId, deviceIds, newState, makeRetryCallback('toggleGroup'));
             } catch (error) {
-                throw new Error(error.message);
+                throw new Error(error.message, { cause: error });
             }
         });
 
         ipcMain.handle('yandex-api:fetchDevice', async (event, token, deviceId) => {
             try {
-                return await yandexApi.fetchDevice(token, deviceId, (attempt, maxAttempts) => {
-                    // Отправляем событие о повторной попытке подключения в React приложение
-                    if (mainWindow && !mainWindow.isDestroyed()) {
-                        mainWindow.webContents.send('yandex-api:retry-attempt', {
-                            attempt,
-                            maxAttempts,
-                            message: `Попытка повторного подключения ${attempt} из ${maxAttempts}...`
-                        });
-                    }
-                });
+                return await yandexApi.fetchDevice(token, deviceId, makeRetryCallback('fetchDevice'));
             } catch (error) {
-                throw new Error(error.message);
+                throw new Error(error.message, { cause: error });
             }
         });
 

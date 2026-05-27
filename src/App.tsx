@@ -5,7 +5,7 @@ import { UpdateNotificationModal } from './components/modals/UpdateNotificationM
 import { fetchUserInfo, executeScenario, toggleDevice, toggleGroup, setDeviceMode } from './services/yandexIoT';
 import { AppState, YandexUserInfoResponse, YandexDevice, YandexRoom, YandexScenario, TrayMenuItem, TrayItemType, YandexHousehold } from './types/index'; 
 import { formatSensorValueForTray } from './constants';
-import { AlertCircle, X } from 'lucide-react';
+import { AlertCircle, CheckCircle, X } from 'lucide-react';
 import { ThemeProvider } from './contexts/ThemeContext';
 import packageJson from '../package.json';
 
@@ -327,10 +327,12 @@ function App() {
 		if (!token || !userData) return;
 		
 		const newState = !currentState;
+		const group = userData.groups.find(g => g.id === groupId);
+		const deviceIds = group?.devices || [];
 
 		try {
 			// 1. Выполняем API-запрос на переключение группы
-			await toggleGroup(token, groupId, newState);
+			await toggleGroup(token, groupId, deviceIds, newState);
 			
 			// 2. Запускаем обновление для синхронизации
 			refreshDashboardData(token);
@@ -679,7 +681,7 @@ useEffect(() => {
       if (!notification) return null;
       return (
           <div className={`fixed bottom-6 right-6 z-[100] px-4 py-3 rounded-xl shadow-2xl flex items-center gap-3 animate-in slide-in-from-bottom-5 fade-in duration-300 border ${notification.type === 'error' ? 'bg-red-100 dark:bg-red-900/90 border-red-300 dark:border-red-500/30 text-red-900 dark:text-white' : 'bg-green-100 dark:bg-green-900/90 border-green-300 dark:border-green-500/30 text-green-900 dark:text-white'}`}>
-              {notification.type === 'error' ? <AlertCircle className="w-5 h-5" /> : <div className="w-5 h-5 rounded-full border-2 border-gray-600 dark:border-white/50 border-t-gray-600 dark:border-t-white animate-spin-none" />} 
+              {notification.type === 'error' ? <AlertCircle className="w-5 h-5" /> : <CheckCircle className="w-5 h-5" />} 
               <span className="text-sm font-medium">{notification.message}</span>
               <button onClick={() => setNotification(null)} className="ml-2 opacity-70 hover:opacity-100">
                   <X className="w-4 h-4"/>

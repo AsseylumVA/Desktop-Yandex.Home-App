@@ -38,7 +38,7 @@ export interface YandexCapability {
   retrievable: boolean;
   reportable: boolean;
   state?: YandexCapabilityState;
-  parameters?: unknown | YandexModeCapabilityParameters;
+  parameters?: YandexModeCapabilityParameters | Record<string, unknown>;
 }
 
 export interface YandexPropertyState {

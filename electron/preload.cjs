@@ -6,7 +6,7 @@ contextBridge.exposeInMainWorld('api', {
     fetchUserInfo: (token) => ipcRenderer.invoke('yandex-api:fetchUserInfo', token),
     executeScenario: (token, scenarioId) => ipcRenderer.invoke('yandex-api:executeScenario', token, scenarioId),
     toggleDevice: (token, deviceId, newState) => ipcRenderer.invoke('yandex-api:toggleDevice', token, deviceId, newState),
-    toggleGroup: (token, groupId, newState) => ipcRenderer.invoke('yandex-api:toggleGroup', token, groupId, newState),
+    toggleGroup: (token, groupId, deviceIds, newState) => ipcRenderer.invoke('yandex-api:toggleGroup', token, groupId, deviceIds, newState),
     setDeviceMode: (token, deviceId, modeActions, turnOn) => ipcRenderer.invoke('yandex-api:setDeviceMode', token, deviceId, modeActions, turnOn),
     fetchDevice: (token, deviceId) => ipcRenderer.invoke('yandex-api:fetchDevice', token, deviceId),
     
@@ -37,10 +37,11 @@ contextBridge.exposeInMainWorld('api', {
     
     // Прослушивание событий повторных попыток подключения (retry)
     onRetryAttempt: (callback) => {
-        ipcRenderer.on('yandex-api:retry-attempt', (event, data) => {
+        const handler = (event, data) => {
             callback(data);
-        });
+        };
+        ipcRenderer.on('yandex-api:retry-attempt', handler);
         // Возвращаем функцию для отписки
-        return () => ipcRenderer.removeAllListeners('yandex-api:retry-attempt');
+        return () => ipcRenderer.removeListener('yandex-api:retry-attempt', handler);
     }
 });

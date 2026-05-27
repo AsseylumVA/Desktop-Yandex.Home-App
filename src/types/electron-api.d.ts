@@ -6,7 +6,7 @@ export interface IYandexApi {
     fetchDevice: (token: string, deviceId: string) => Promise<YandexDevice>; 
     executeScenario: (token: string, scenarioId: string) => Promise<void>;
     toggleDevice: (token: string, deviceId: string, newState: boolean) => Promise<void>;
-    toggleGroup: (token: string, groupId: string, newState: boolean) => Promise<void>;
+    toggleGroup: (token: string, groupId: string, deviceIds: string[], newState: boolean) => Promise<void>;
     setDeviceMode: (token: string, deviceId: string, modeActions: YandexModeAction[], turnOn?: boolean) => Promise<void>;
 	  getSecureToken: () => Promise<string | null>;
     setSecureToken: (token: string) => Promise<void>;

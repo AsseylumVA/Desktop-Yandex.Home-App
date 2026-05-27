@@ -5,7 +5,12 @@ const BASE_URL = 'https://api.iot.yandex.net/v1.0';
 // Константы для retry механизма
 const RETRY_CONFIG = {
     MAX_ATTEMPTS: 5,
-    RETRY_DELAY_MS: 60000, // 60 секунд
+    BASE_DELAY_MS: 5000, // 5 секунд начальная задержка
+};
+
+const getRetryDelay = (attempt) => {
+    // Exponential backoff: 5s, 10s, 20s, 40s, 80s (макс 80с)
+    return Math.min(RETRY_CONFIG.BASE_DELAY_MS * Math.pow(2, attempt - 1), 80000);
 };
 
 // Вспомогательная функция для проверки ошибок сети
@@ -62,10 +67,11 @@ const withRetry = async (asyncFn, onRetryAttempt = null) => {
                 onRetryAttempt(attempt, RETRY_CONFIG.MAX_ATTEMPTS);
             }
             
-            console.log(`Попытка ${attempt} из ${RETRY_CONFIG.MAX_ATTEMPTS} не удалась. Повтор через ${RETRY_CONFIG.RETRY_DELAY_MS / 1000} сек...`, error);
+            const delay = getRetryDelay(attempt);
+            console.log(`Попытка ${attempt} из ${RETRY_CONFIG.MAX_ATTEMPTS} не удалась. Повтор через ${delay / 1000} сек...`, error);
             
             // Ждем перед следующей попыткой
-            await new Promise(resolve => setTimeout(resolve, RETRY_CONFIG.RETRY_DELAY_MS));
+            await new Promise(resolve => setTimeout(resolve, delay));
         }
     }
     
@@ -117,8 +123,8 @@ export const fetchDevice = async (token, deviceId, onRetryAttempt = null) => {
 };
 
 // 2. Выполнение сценария
-export const executeScenario = async (token, scenarioId) => {
-    try {
+export const executeScenario = async (token, scenarioId, onRetryAttempt = null) => {
+    return withRetry(async () => {
         const response = await fetch(`${BASE_URL}/scenarios/${scenarioId}/actions`, {
             method: 'POST',
             headers: {
@@ -130,14 +136,11 @@ export const executeScenario = async (token, scenarioId) => {
         if (!response.ok) {
             throw new Error(`Не удалось запустить сценарий: ${response.status}`);
         }
-    } catch (error) {
-        handleFetchError(error);
-        throw error;
-    }
+    }, onRetryAttempt);
 };
 
 // 3. Переключение устройства
-export const toggleDevice = async (token, deviceId, newState) => {
+export const toggleDevice = async (token, deviceId, newState, onRetryAttempt = null) => {
     const body = {
         devices: [
             {
@@ -155,7 +158,7 @@ export const toggleDevice = async (token, deviceId, newState) => {
         ]
     };
 
-    try {
+    return withRetry(async () => {
         const response = await fetch(`${BASE_URL}/devices/actions`, {
             method: 'POST',
             headers: {
@@ -169,29 +172,16 @@ export const toggleDevice = async (token, deviceId, newState) => {
             throw new Error(`Не удалось изменить состояние устройства: ${response.status}`);
         }
         
-        // ... (логика проверки ошибок в теле ответа)
         const data = await response.json();
         const deviceResult = data.devices?.find((d) => d.id === deviceId);
         if (deviceResult && 'error_code' in deviceResult) {
             throw new Error(`Ошибка устройства: ${deviceResult.error_message || deviceResult.error_code}`);
         }
-    } catch (error) {
-        handleFetchError(error);
-        throw error;
-    }
+    }, onRetryAttempt);
 };
 
 // 4. Установка режима устройства (для кондиционеров и других устройств с режимами)
-export const setDeviceMode = async (token, deviceId, modeActions, turnOn = false) => {
-    // modeActions - массив объектов { instance: string, value: any, type?: string }
-    // Например: 
-    // [{ instance: "thermostat", value: "cool" }, { instance: "fan_speed", value: "auto" }] - mode
-    // [{ instance: "brightness", value: "50", type: 'devices.capabilities.range' }] - range
-    // [{ instance: "hsv", value: { h: 125, s: 25, v: 100 }, type: 'devices.capabilities.color_setting' }] - color
-    // [{ instance: "oscillation", value: true, type: 'devices.capabilities.toggle' }] - toggle
-    // turnOn - опциональный параметр для включения устройства
-
-    // Корректно формируем actions для mode, range, color_setting и toggle
+export const setDeviceMode = async (token, deviceId, modeActions, turnOn = false, onRetryAttempt = null) => {
     const actions = modeActions.map(action => {
         if (action.type === 'devices.capabilities.toggle' || action.instance === 'oscillation') {
             return {
@@ -207,7 +197,7 @@ export const setDeviceMode = async (token, deviceId, modeActions, turnOn = false
                 type: 'devices.capabilities.color_setting',
                 state: {
                     instance: action.instance,
-                    value: action.instance === 'temperature_k' ? Number(action.value) : action.value // temperature_k как число, HSV и RGB как объекты
+                    value: action.instance === 'temperature_k' ? Number(action.value) : action.value
                 }
             };
         }
@@ -220,7 +210,6 @@ export const setDeviceMode = async (token, deviceId, modeActions, turnOn = false
                 }
             };
         }
-        // По умолчанию mode
         return {
             type: 'devices.capabilities.mode',
             state: {
@@ -230,7 +219,6 @@ export const setDeviceMode = async (token, deviceId, modeActions, turnOn = false
         };
     });
 
-    // Если нужно включить устройство, добавляем действие включения
     if (turnOn) {
         actions.push({
             type: "devices.capabilities.on_off",
@@ -250,7 +238,7 @@ export const setDeviceMode = async (token, deviceId, modeActions, turnOn = false
         ]
     };
 
-    try {
+    return withRetry(async () => {
         const response = await fetch(`${BASE_URL}/devices/actions`, {
             method: 'POST',
             headers: {
@@ -269,45 +257,49 @@ export const setDeviceMode = async (token, deviceId, modeActions, turnOn = false
         if (deviceResult && 'error_code' in deviceResult) {
             throw new Error(`Ошибка устройства: ${deviceResult.error_message || deviceResult.error_code}`);
         }
-    } catch (error) {
-        handleFetchError(error);
-        throw error;
-    }
+    }, onRetryAttempt);
 };
 
 // 5. Управление группой устройств (включение/выключение всех устройств в группе)
-export const toggleGroup = async (token, groupId, newState) => {
-    try {
-        // Сначала получаем информацию о группе, чтобы узнать ID устройств
-        const userInfo = await fetch(`${BASE_URL}/user/info`, {
+export const toggleGroup = async (token, groupId, deviceIds, newState, onRetryAttempt = null) => {
+    if (!deviceIds || deviceIds.length === 0) {
+        throw new Error(`В группе нет устройств`);
+    }
+
+    const devices = deviceIds.map(id => ({
+        id,
+        actions: [
+            {
+                type: "devices.capabilities.on_off",
+                state: {
+                    instance: "on",
+                    value: newState
+                }
+            }
+        ]
+    }));
+
+    const body = { devices };
+
+    return withRetry(async () => {
+        const response = await fetch(`${BASE_URL}/devices/actions`, {
+            method: 'POST',
             headers: {
                 'Authorization': `Bearer ${token}`,
-            }
+                'Content-Type': 'application/json',
+            },
+            body: JSON.stringify(body)
         });
 
-        if (!userInfo.ok) {
-            throw new Error(`Не удалось получить информацию о пользователе: ${userInfo.status}`);
+        if (!response.ok) {
+            throw new Error(`Не удалось переключить группу: ${response.status}`);
         }
 
-        const userData = await userInfo.json();
-        const group = userData.groups?.find(g => g.id === groupId);
-
-        if (!group) {
-            throw new Error(`Группа не найдена: ${groupId}`);
+        const data = await response.json();
+        const errors = (data.devices || []).filter(d => 'error_code' in d);
+        if (errors.length > 0) {
+            const firstError = errors[0];
+            throw new Error(`Ошибка устройства: ${firstError.error_message || firstError.error_code}`);
         }
-
-        if (!group.devices || group.devices.length === 0) {
-            throw new Error(`В группе нет устройств`);
-        }
-
-        // Переключаем каждое устройство в группе
-        const devicePromises = group.devices.map(deviceId => 
-            toggleDevice(token, deviceId, newState)
-        );
-
-        await Promise.all(devicePromises);
-    } catch (error) {
-        handleFetchError(error);
-        throw error;
-    }
+    }, onRetryAttempt);
 };

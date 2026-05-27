@@ -699,9 +699,9 @@ export const setDeviceMode = async (token: string, deviceId: string, modeActions
     }
 };
 
-export const toggleGroup = async (token: string, groupId: string, newState: boolean): Promise<void> => {
+export const toggleGroup = async (token: string, groupId: string, deviceIds: string[], newState: boolean): Promise<void> => {
     try {
-        await yandexApi.toggleGroup(token, groupId, newState);
+        await yandexApi.toggleGroup(token, groupId, deviceIds, newState);
         console.log('Группа переключена успешно.');
     } catch (error) {
         console.error('Ошибка при переключении группы через IPC:', error);
