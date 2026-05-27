@@ -1,5 +1,5 @@
 import React, { useMemo, useState, useCallback, useEffect } from 'react';
-import { YandexUserInfoResponse, YandexScenario, YandexHousehold, YandexDevice, YandexGroup } from '../types/index';
+import { YandexUserInfoResponse, YandexScenario, YandexHousehold, YandexDevice, YandexGroup, YandexModeAction } from '../types/index';
 import { ScenarioCard } from './cards/ScenarioCard';
 import { DeviceCard } from './cards/DeviceCard';
 import { GroupCard } from './cards/GroupCard';
@@ -356,28 +356,24 @@ export const Dashboard: React.FC<DashboardProps> = ({
       // В режиме нескольких домов сценарий должен быть жёстко привязан к дому через устройства.
       if (!currentHousehold) return false;
 
-      const anyScenario = scenario as any;
-      const steps: any[] = Array.isArray(anyScenario.steps) ? anyScenario.steps : [];
+      const steps = scenario.steps || [];
 
       // Собираем items из steps[].parameters.items[]
-      const items: any[] = [];
+      const items: Array<{ id: string }> = [];
       for (const step of steps) {
-        const parameters = step?.parameters;
-        if (!parameters) continue;
-
-        const stepItems: any[] = Array.isArray(parameters.items) ? parameters.items : [];
-        for (const it of stepItems) {
+        if (!step?.parameters?.items) continue;
+        for (const it of step.parameters.items) {
           items.push(it);
         }
       }
 
-      // Если в сценарии нет корректных items/id устройств — сценарий считается "ничейным" и исключается.
-      if (items.length === 0) return false;
+      // Если в сценарии нет информации об устройствах — показываем его (не можем отфильтровать)
+      if (items.length === 0) return true;
 
       const targetHouseholdId = currentHousehold.id;
 
       for (const item of items) {
-        const deviceId = item && typeof item.id === 'string' ? item.id : null;
+        const deviceId = typeof item.id === 'string' ? item.id : null;
         if (!deviceId) continue;
 
         const deviceHouseholdId = deviceHouseholdMap.get(deviceId);
@@ -414,12 +410,12 @@ export const Dashboard: React.FC<DashboardProps> = ({
     setSelectedThermostatDevice(null);
   }, []);
 
-  const handleApplyThermostatSettings = useCallback(async (modeActions: Array<{ instance: string; value: string }>) => {
+  const handleApplyThermostatSettings = useCallback(async (modeActions: YandexModeAction[]) => {
     if (!selectedThermostatDevice) return;
     await onSetDeviceMode(selectedThermostatDevice.id, modeActions, true); // Включаем устройство при применении
   }, [selectedThermostatDevice, onSetDeviceMode]);
 
-  const handleOkThermostatSettings = useCallback(async (modeActions: Array<{ instance: string; value: string }>) => {
+  const handleOkThermostatSettings = useCallback(async (modeActions: YandexModeAction[]) => {
     if (!selectedThermostatDevice) return;
     await onSetDeviceMode(selectedThermostatDevice.id, modeActions);
     setSelectedThermostatDevice(null);

@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { YandexGroup, YandexDevice, YandexCapability, YandexModeCapabilityParameters } from '../../types/index';
+import { YandexGroup, YandexDevice, YandexCapability, YandexModeCapabilityParameters, YandexModeAction } from '../../types/index';
 import { 
   X, 
   Settings, 
@@ -25,7 +25,7 @@ interface GroupThermostatSettingsModalProps {
   devices: YandexDevice[];
   isOpen: boolean;
   onClose: () => void;
-  onApply: (modeActions: Array<{ instance: string; value: string }>, turnOn?: boolean) => Promise<void>;
+  onApply: (modeActions: YandexModeAction[], turnOn?: boolean) => Promise<void>;
 }
 
 export const GroupThermostatSettingsModal: React.FC<GroupThermostatSettingsModalProps> = ({
@@ -196,27 +196,26 @@ export const GroupThermostatSettingsModal: React.FC<GroupThermostatSettingsModal
   if (!isOpen) return null;
 
   const handleApply = async () => {
-    // Формируем массив actions
-    const modeActions: Array<{ instance: string; value: string }> = [];
+    const modeActions: YandexModeAction[] = [];
 
     if (thermostatCap && thermostatMode) {
-      modeActions.push({ instance: 'thermostat', value: thermostatMode });
+      modeActions.push({ instance: 'thermostat', value: thermostatMode, type: 'devices.capabilities.mode' });
     }
     if (swingCap && swingMode) {
-      modeActions.push({ instance: 'swing', value: swingMode });
+      modeActions.push({ instance: 'swing', value: swingMode, type: 'devices.capabilities.mode' });
     }
     if (fanSpeedCap && fanSpeed) {
-      modeActions.push({ instance: 'fan_speed', value: fanSpeed });
+      modeActions.push({ instance: 'fan_speed', value: fanSpeed, type: 'devices.capabilities.mode' });
     }
     if (rangeCapability && temperature !== null) {
-      modeActions.push({ instance: 'temperature', value: temperature.toString() });
+      modeActions.push({ instance: 'temperature', value: temperature, type: 'devices.capabilities.range' });
     }
 
     if (modeActions.length === 0) return;
 
     setIsLoading(true);
     try {
-      await onApply(modeActions, true); // Включаем устройства при применении
+      await onApply(modeActions, true);
     } catch (error) {
       console.error('Ошибка при применении настроек климата группы:', error);
     } finally {

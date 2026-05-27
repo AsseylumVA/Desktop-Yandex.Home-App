@@ -1,8 +1,21 @@
+export interface YandexScenarioStep {
+  parameters?: {
+    items?: Array<{ id: string }>;
+  };
+}
+
 export interface YandexScenario {
   id: string;
   name: string;
   is_active: boolean;
-  icon?: string; 
+  icon?: string;
+  steps?: YandexScenarioStep[];
+}
+
+export interface YandexModeAction {
+  instance: string;
+  value: any;
+  type?: string;
 }
 
 export interface YandexCapabilityState {

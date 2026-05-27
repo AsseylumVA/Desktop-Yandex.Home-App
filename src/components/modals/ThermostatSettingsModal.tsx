@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { YandexDevice, YandexCapability, YandexModeCapabilityParameters } from '../../types/index';
+import { YandexDevice, YandexCapability, YandexModeCapabilityParameters, YandexModeAction } from '../../types/index';
 import { 
   X, 
   Settings, 
@@ -24,7 +24,7 @@ interface ThermostatSettingsModalProps {
   device: YandexDevice;
   isOpen: boolean;
   onClose: () => void;
-  onApply: (modeActions: Array<{ instance: string; value: string }>, turnOn?: boolean) => Promise<void>;
+  onApply: (modeActions: YandexModeAction[], turnOn?: boolean) => Promise<void>;
 }
 
 export const ThermostatSettingsModal: React.FC<ThermostatSettingsModalProps> = ({
@@ -194,8 +194,7 @@ export const ThermostatSettingsModal: React.FC<ThermostatSettingsModalProps> = (
   if (!isOpen) return null;
 
   const handleApply = async () => {
-    // Формируем массив actions в расширенном формате для внутреннего использования
-    const modeActions: Array<{ instance: string; value: string | number; type?: string }> = [];
+    const modeActions: YandexModeAction[] = [];
 
     if (thermostatCap && thermostatMode) {
       modeActions.push({ instance: 'thermostat', value: thermostatMode, type: 'devices.capabilities.mode' });
@@ -214,13 +213,7 @@ export const ThermostatSettingsModal: React.FC<ThermostatSettingsModalProps> = (
 
     setIsLoading(true);
     try {
-      // Преобразуем в формат, ожидаемый onApply, и передаём расширенную информацию через замыкание
-      const actionsForApi = modeActions.map(action => ({
-        instance: action.instance,
-        value: String(action.value),
-        type: action.type
-      }));
-      await (onApply as any)(actionsForApi, true); // Передаем true для включения устройства
+      await onApply(modeActions, true);
     } catch (error) {
       console.error('Ошибка при применении настроек:', error);
     } finally {

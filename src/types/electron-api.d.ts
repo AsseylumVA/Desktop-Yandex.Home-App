@@ -1,5 +1,5 @@
 // electron-api.d.ts
-import { YandexUserInfoResponse, YandexDevice, TrayMenuItem } from './index'; 
+import { YandexUserInfoResponse, YandexDevice, TrayMenuItem, YandexModeAction } from './index'; 
 
 export interface IYandexApi {
     fetchUserInfo: (token: string) => Promise<YandexUserInfoResponse>;
@@ -7,7 +7,7 @@ export interface IYandexApi {
     executeScenario: (token: string, scenarioId: string) => Promise<void>;
     toggleDevice: (token: string, deviceId: string, newState: boolean) => Promise<void>;
     toggleGroup: (token: string, groupId: string, newState: boolean) => Promise<void>;
-    setDeviceMode: (token: string, deviceId: string, modeActions: Array<{ instance: string; value: string }>, turnOn?: boolean) => Promise<void>;
+    setDeviceMode: (token: string, deviceId: string, modeActions: YandexModeAction[], turnOn?: boolean) => Promise<void>;
 	  getSecureToken: () => Promise<string | null>;
     setSecureToken: (token: string) => Promise<void>;
     deleteSecureToken: () => Promise<void>;

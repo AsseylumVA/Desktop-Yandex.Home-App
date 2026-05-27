@@ -1,4 +1,4 @@
-import { YandexUserInfoResponse, YandexDevice, YandexRoom, YandexGroup } from '../types/index';
+import { YandexUserInfoResponse, YandexDevice, YandexRoom, YandexGroup, YandexModeAction } from '../types/index';
 
 const yandexApi = window.api;
 
@@ -690,7 +690,7 @@ export const executeScenario = async (token: string, scenarioId: string): Promis
     }
 };
 
-export const setDeviceMode = async (token: string, deviceId: string, modeActions: Array<{ instance: string; value: string }>, turnOn: boolean = false): Promise<void> => {
+export const setDeviceMode = async (token: string, deviceId: string, modeActions: YandexModeAction[], turnOn: boolean = false): Promise<void> => {
     try {
         await yandexApi.setDeviceMode(token, deviceId, modeActions, turnOn);
     } catch (error) {

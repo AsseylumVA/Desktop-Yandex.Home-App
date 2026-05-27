@@ -95,6 +95,12 @@ function App() {
   const [showUpdateNotification, setShowUpdateNotification] = useState<boolean>(false);
   const [updateInfo, setUpdateInfo] = useState<{latestVersion: string, releaseUrl: string, releaseDate: string} | null>(null);
 
+  // Ref для userData, чтобы избежать пересоздания refreshDashboardData при обновлении данных
+  const userDataRef = useRef(userData);
+  useEffect(() => {
+    userDataRef.current = userData;
+  }, [userData]);
+
 	// --- Уведомления ---
 	const showNotification = useCallback((message: string, type: 'error' | 'success' = 'error') => {
 	  setNotification({ message, type });
@@ -175,7 +181,7 @@ function App() {
      		const sortedData = stableSortData(data);
      		
      		// Проверяем, есть ли изменения в состоянии устройств
-     		const hasChanges = hasDeviceStateChanges(userData, sortedData);
+      		const hasChanges = hasDeviceStateChanges(userDataRef.current, sortedData);
      		
      		setUserData(sortedData);
             const households = sortedData.households || [];
@@ -215,7 +221,7 @@ function App() {
     			setIsRefreshing(false);
     		}
     	}
- 	}, [showNotification, stableSortData, userData, hasDeviceStateChanges]);
+ 	}, [showNotification, stableSortData, hasDeviceStateChanges]);
   
 	// Функция для инициализации и авторизации (меняет appState)
 	const loadData = useCallback(async (apiToken: string) => {
