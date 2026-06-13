@@ -33,6 +33,8 @@ interface DashboardProps {
   onToggleDeviceFavorite: (id: string) => void;
   favoriteScenarioIds: string[];
   onToggleScenarioFavorite: (id: string) => void;
+  favoriteGroupIds: string[];
+  onToggleGroupFavorite: (id: string) => void;
   isAutostartEnabled: boolean;
   onToggleAutostart: () => void;
 }
@@ -53,6 +55,8 @@ export const Dashboard: React.FC<DashboardProps> = ({
   onToggleDeviceFavorite,
   favoriteScenarioIds,
   onToggleScenarioFavorite,
+  favoriteGroupIds,
+  onToggleGroupFavorite,
   isAutostartEnabled,
   onToggleAutostart,
 }) => {
@@ -396,11 +400,13 @@ export const Dashboard: React.FC<DashboardProps> = ({
     s => favoriteScenarioIds.includes(s.id) && isScenarioInCurrentHome(s)
   );
   const favoriteDevices = devicesForHome.filter(d => favoriteDeviceIds.includes(d.id));
+  const favoriteGroups = groupsForHome.filter(g => favoriteGroupIds.includes(g.id));
 
   const visibleFavoriteScenarios = favoriteScenarios.filter(s => !getEffectiveHidden(`scenario_${s.id}`));
   const visibleFavoriteDevices = favoriteDevices.filter(d => !getEffectiveHidden(`device_${d.id}`));
+  const visibleFavoriteGroups = favoriteGroups.filter(g => !getEffectiveHidden(`group_${g.id}`));
 
-  const hasFavorites = favoriteScenarios.length > 0 || favoriteDevices.length > 0;
+  const hasFavorites = favoriteScenarios.length > 0 || favoriteDevices.length > 0 || favoriteGroups.length > 0;
 
   const handleOpenThermostatSettings = useCallback((device: YandexDevice) => {
     setSelectedThermostatDevice(device);
@@ -811,6 +817,57 @@ export const Dashboard: React.FC<DashboardProps> = ({
 						</div>
 					</>
 				)}
+
+				{/* Избранные группы */}
+				{visibleFavoriteGroups.length > 0 && (
+					<>
+						<h3 className="text-lg font-medium text-slate-700 dark:text-slate-300 mt-6 mb-3">Группы ({visibleFavoriteGroups.length})</h3>
+						<div className="space-y-4">
+							{visibleFavoriteGroups.map(group => (
+								<GroupCard
+									key={group.id}
+									group={group}
+									devices={devicesForHome}
+									onToggleGroup={onToggleGroup}
+									onToggleDevice={onToggleDevice}
+									favoriteDeviceIds={favoriteDeviceIds}
+									onToggleDeviceFavorite={onToggleDeviceFavorite}
+									isFavorite={true}
+									onToggleFavorite={onToggleGroupFavorite}
+									onOpenSettings={(device) => {
+										if (isLightDevice(device.type)) {
+											handleOpenLightSettings(device);
+										} else if (device.type === 'devices.types.ventilation.fan') {
+											handleOpenFanSettings(device);
+										} else {
+											handleOpenThermostatSettings(device);
+										}
+									}}
+									onOpenGroupSettings={(group) => {
+										const groupDevices = devicesForHome.filter(d => group.devices.includes(d.id));
+										const isLightGroupCheck = isLightGroup(groupDevices);
+										const isThermostatGroup = groupDevices.length > 0 && groupDevices.every(d => 
+											d.type === 'devices.types.thermostat.ac' || d.type === 'devices.types.thermostat'
+										);
+										const isFanGroup = groupDevices.length > 0 && groupDevices.every(d => d.type === 'devices.types.ventilation.fan');
+										
+										if (isLightGroupCheck) {
+											handleOpenGroupLightSettings(group);
+										} else if (isThermostatGroup) {
+											handleOpenGroupThermostatSettings(group);
+										} else if (isFanGroup) {
+											handleOpenFanGroupSettings(group);
+										}
+									}}
+									isEditMode={isEditMode}
+									getEffectiveHidden={getEffectiveHidden}
+									getIconHiddenState={getIconHiddenState}
+									onToggleDeviceVisibility={toggleCardVisibility}
+								/>
+							))}
+						</div>
+					</>
+				)}
 			</section>
 		)}
 
@@ -901,6 +958,8 @@ export const Dashboard: React.FC<DashboardProps> = ({
                       onToggleDevice={onToggleDevice}
                       favoriteDeviceIds={favoriteDeviceIds}
                       onToggleDeviceFavorite={onToggleDeviceFavorite}
+                      isFavorite={favoriteGroupIds.includes(group.id)}
+                      onToggleFavorite={onToggleGroupFavorite}
                       onOpenSettings={(device) => {
                         if (isLightDevice(device.type)) {
                           handleOpenLightSettings(device);
@@ -923,7 +982,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
                         } else if (isThermostatGroup) {
                           handleOpenGroupThermostatSettings(group);
                         } else if (isFanGroup) {
-                          handleOpenGroupFanSettings(group);
+                          handleOpenFanGroupSettings(group);
                         }
                       }}
                       isEditMode={isEditMode}

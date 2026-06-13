@@ -1,7 +1,7 @@
 import React, { useState, useMemo } from 'react';
 import { YandexGroup, YandexDevice } from '../../types/index';
 import { DeviceCard } from './DeviceCard';
-import { Loader2, Power, ChevronDown, ChevronRight, Settings } from 'lucide-react';
+import { Loader2, Power, ChevronDown, ChevronRight, Settings, Star } from 'lucide-react';
 import { isLightGroup } from '../../constants';
 
 interface GroupCardProps {
@@ -11,6 +11,8 @@ interface GroupCardProps {
   onToggleDevice: (id: string, currentState: boolean) => Promise<void>;
   favoriteDeviceIds: string[];
   onToggleDeviceFavorite: (id: string) => void;
+  isFavorite?: boolean;
+  onToggleFavorite?: (id: string) => void;
   onOpenSettings?: (device: YandexDevice) => void;
   onOpenGroupSettings?: (group: YandexGroup) => void;
   isEditMode?: boolean;
@@ -26,6 +28,8 @@ export const GroupCard: React.FC<GroupCardProps> = ({
   onToggleDevice,
   favoriteDeviceIds,
   onToggleDeviceFavorite,
+  isFavorite = false,
+  onToggleFavorite,
   onOpenSettings,
   onOpenGroupSettings,
   isEditMode = false,
@@ -119,6 +123,22 @@ export const GroupCard: React.FC<GroupCardProps> = ({
       {/* Тумблер вкл/выкл для группы */}
         {hasOnOffCapability && (
           <div className="flex items-center gap-2">
+            {onToggleFavorite && (
+              <div
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onToggleFavorite(group.id);
+                }}
+                className={`flex-shrink-0 p-3 rounded-lg transition-all duration-300 cursor-pointer ${
+                  isFavorite
+                    ? 'text-yellow-500 dark:text-accent bg-white/80 dark:bg-surface/80 hover:bg-white dark:hover:bg-surface'
+                    : 'text-gray-400 dark:text-slate-500 hover:text-yellow-500 dark:hover:text-accent bg-gray-100 dark:bg-slate-800 hover:bg-gray-200 dark:hover:bg-slate-700'
+                }`}
+                title={isFavorite ? 'Убрать из избранного' : 'Добавить в избранное'}
+              >
+                <Star className={`w-5 h-5 ${isFavorite ? 'fill-current' : ''}`} />
+              </div>
+            )}
             {isLightGroupCheck && onOpenGroupSettings && (
               <button
                 onClick={() => onOpenGroupSettings(group)}

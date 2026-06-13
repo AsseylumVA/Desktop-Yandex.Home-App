@@ -84,6 +84,7 @@ function App() {
   // Состояние избранного, загруженное из LocalStorage
   const [favoriteDeviceIds, setFavoriteDeviceIds] = useState<string[]>(getFavorites('favoriteDeviceIds'));
   const [favoriteScenarioIds, setFavoriteScenarioIds] = useState<string[]>(getFavorites('favoriteScenarioIds'));
+  const [favoriteGroupIds, setFavoriteGroupIds] = useState<string[]>(getFavorites('favoriteGroupIds'));
   
   // Состояние автозапуска
   const [isAutostartEnabled, setIsAutostartEnabled] = useState<boolean>(false);
@@ -438,6 +439,16 @@ function App() {
 		});
 	}, []);
 
+	const handleToggleGroupFavorite = useCallback((id: string) => {
+		setFavoriteGroupIds(prevIds => {
+			const newIds = prevIds.includes(id)
+				? prevIds.filter(itemId => itemId !== id)
+				: [...prevIds, id];
+			setFavorites('favoriteGroupIds', newIds);
+			return newIds;
+		});
+	}, []);
+
   // --- 1. useEffect: Проверка токена при запуске ---
   useEffect(() => {
     const checkToken = async () => {
@@ -744,8 +755,10 @@ useEffect(() => {
           isRefreshing={isRefreshing}
 		      favoriteDeviceIds={favoriteDeviceIds}
           onToggleDeviceFavorite={handleToggleDeviceFavorite}
-          favoriteScenarioIds={favoriteScenarioIds}
+		      favoriteScenarioIds={favoriteScenarioIds}
           onToggleScenarioFavorite={handleToggleScenarioFavorite}
+          favoriteGroupIds={favoriteGroupIds}
+          onToggleGroupFavorite={handleToggleGroupFavorite}
           isAutostartEnabled={isAutostartEnabled}
           onToggleAutostart={handleToggleAutostart}
         />
