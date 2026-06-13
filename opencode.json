@@ -1,0 +1,46 @@
+{
+  "$schema": "https://opencode.ai/config.json",
+  "mcp": {
+    "filesystem": {
+      "type": "local",
+      "command": [
+        "npx",
+        "-y",
+        "@modelcontextprotocol/server-filesystem",
+        "/Users/ed/GitHub/Desktop-Yandex.Home-App"
+      ],
+      "enabled": true,
+      "description": "Filesystem operations — read/write files, create/list/delete dirs, search, metadata"
+    },
+    "sequential-thinking": {
+      "type": "local",
+      "command": [
+        "npx",
+        "-y",
+        "@modelcontextprotocol/server-sequential-thinking"
+      ],
+      "enabled": true,
+      "description": "Structured step-by-step problem solving with revisions and branching"
+    },
+    "memories.sh": {
+      "type": "local",
+      "command": [
+        "npx",
+        "-y",
+        "@memories.sh/cli",
+        "serve"
+      ],
+      "enabled": true,
+      "description": "Persistent memory for coding agents — stores context, rules, and facts across sessions via SQLite"
+    },
+    "codegraph": {
+      "type": "local",
+      "command": [
+        "code-graph-mcp"
+      ],
+      "enabled": true,
+      "description": "Code knowledge graph — AST search, call graph, impact analysis, dependency graph, dead code detection"
+    }
+  },
+  "instructions": ["AGENTS.md"]
+}
