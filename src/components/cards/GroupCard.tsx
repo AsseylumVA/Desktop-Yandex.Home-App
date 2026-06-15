@@ -14,6 +14,7 @@ interface GroupCardProps {
   isFavorite?: boolean;
   onToggleFavorite?: (id: string) => void;
   onOpenSettings?: (device: YandexDevice) => void;
+  onOpenCameraStream?: (device: YandexDevice) => void;
   onOpenGroupSettings?: (group: YandexGroup) => void;
   isEditMode?: boolean;
   getEffectiveHidden?: (cardId: string) => boolean;
@@ -31,6 +32,7 @@ export const GroupCard: React.FC<GroupCardProps> = ({
   isFavorite = false,
   onToggleFavorite,
   onOpenSettings,
+  onOpenCameraStream,
   onOpenGroupSettings,
   isEditMode = false,
   getEffectiveHidden = (id) => false,
@@ -202,6 +204,7 @@ export const GroupCard: React.FC<GroupCardProps> = ({
                     isFavorite={favoriteDeviceIds.includes(device.id)}
                     onToggleFavorite={onToggleDeviceFavorite}
                     onOpenSettings={onOpenSettings}
+                    onOpenCameraStream={onOpenCameraStream}
                     isEditMode={isEditMode}
                     iconHiddenState={getIconHiddenState(cardId)}
                     onToggleVisibility={() => onToggleDeviceVisibility?.(cardId)}

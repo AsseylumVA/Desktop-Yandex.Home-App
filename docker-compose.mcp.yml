@@ -1,0 +1,29 @@
+# MCP-серверы для AGENTS.md (сборка кастомных образов + предзагрузка официальных)
+#
+# Использование:
+#   docker compose -f docker-compose.mcp.yml pull
+#   docker compose -f docker-compose.mcp.yml build
+#   .\scripts\mcp-docker-setup.ps1
+
+services:
+  filesystem:
+    build:
+      context: .
+      dockerfile: docker/mcp/filesystem.Dockerfile
+    image: yandex-home-mcp/filesystem:latest
+
+  sequential-thinking:
+    image: mcp/sequentialthinking
+    profiles: [pull]
+
+  memories:
+    build:
+      context: .
+      dockerfile: docker/mcp/memories.Dockerfile
+    image: yandex-home-mcp/memories:latest
+
+  codegraph:
+    build:
+      context: .
+      dockerfile: docker/mcp/codegraph.Dockerfile
+    image: yandex-home-mcp/codegraph:latest

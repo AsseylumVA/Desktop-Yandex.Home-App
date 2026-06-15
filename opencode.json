@@ -4,10 +4,14 @@
     "filesystem": {
       "type": "local",
       "command": [
-        "npx",
-        "-y",
-        "@modelcontextprotocol/server-filesystem",
-        "/Users/ed/GitHub/Desktop-Yandex.Home-App"
+        "docker",
+        "run",
+        "-i",
+        "--rm",
+        "--mount",
+        "type=bind,src=${workspaceFolder},dst=/projects/workspace",
+        "yandex-home-mcp/filesystem:latest",
+        "/projects"
       ],
       "enabled": true,
       "description": "Filesystem operations — read/write files, create/list/delete dirs, search, metadata"
@@ -15,9 +19,11 @@
     "sequential-thinking": {
       "type": "local",
       "command": [
-        "npx",
-        "-y",
-        "@modelcontextprotocol/server-sequential-thinking"
+        "docker",
+        "run",
+        "-i",
+        "--rm",
+        "mcp/sequentialthinking"
       ],
       "enabled": true,
       "description": "Structured step-by-step problem solving with revisions and branching"
@@ -25,10 +31,13 @@
     "memories.sh": {
       "type": "local",
       "command": [
-        "npx",
-        "-y",
-        "@memories.sh/cli",
-        "serve"
+        "docker",
+        "run",
+        "-i",
+        "--rm",
+        "-v",
+        "${userHome}/.config/memories:/data",
+        "yandex-home-mcp/memories:latest"
       ],
       "enabled": true,
       "description": "Persistent memory for coding agents — stores context, rules, and facts across sessions via SQLite"
@@ -36,7 +45,15 @@
     "codegraph": {
       "type": "local",
       "command": [
-        "code-graph-mcp"
+        "docker",
+        "run",
+        "-i",
+        "--rm",
+        "-v",
+        "${workspaceFolder}:/workspace",
+        "-w",
+        "/workspace",
+        "yandex-home-mcp/codegraph:latest"
       ],
       "enabled": true,
       "description": "Code knowledge graph — AST search, call graph, impact analysis, dependency graph, dead code detection"
