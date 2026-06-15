@@ -43,3 +43,29 @@
 3. **Работа с файлами** → встроенные инструменты opencode + `filesystem` MCP если нужно
 4. **Сохранение контекста** → `memory` для записи важных решений и конфигурации
 5. **Валидация** → запускать сборку (`npm run build`) после изменений
+
+## Docker
+
+MCP-серверы запускаются через Docker (конфигурация в `.cursor/mcp.json` и `opencode.json`).
+
+### Первоначальная настройка
+
+```powershell
+.\scripts\mcp-docker-setup.ps1
+```
+
+Скрипт:
+- скачивает официальный образ `mcp/sequentialthinking`
+- собирает образы `yandex-home-mcp/filesystem`, `yandex-home-mcp/memories` и `yandex-home-mcp/codegraph`
+- создаёт каталог `%USERPROFILE%\.config\memories` для SQLite-хранилища
+
+### Образы
+
+| Сервер | Docker-образ |
+|--------|--------------|
+| Filesystem | `yandex-home-mcp/filesystem` (сборка из `docker/mcp/filesystem.Dockerfile`) |
+| Sequential Thinking | `mcp/sequentialthinking` (официальный) |
+| Memories.sh | `yandex-home-mcp/memories` (сборка из `docker/mcp/memories.Dockerfile`) |
+| CodeGraph | `yandex-home-mcp/codegraph` (сборка из `docker/mcp/codegraph.Dockerfile`) |
+
+После настройки перезапустите Cursor и включите серверы в **Settings → MCP**.
