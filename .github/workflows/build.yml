@@ -2,34 +2,30 @@ name: Build Desktop App Installers (CI)
 
 on:
   push:
-    # Рабочий процесс запускается ТОЛЬКО при пуше тега, соответствующего паттерну vX.Y.Z
     tags:
       - 'v[0-9]+.[0-9]+.[0-9]+'
 
 jobs:
   build:
-    # Добавление разрешений для GH_TOKEN
     permissions:
       contents: write
       packages: write
-      
-    # Используем матрицу, чтобы запустить одни и те же шаги на разных ОС
+
     strategy:
       matrix:
         os: [macos-latest, ubuntu-latest, windows-latest]
-    
+
     runs-on: ${{ matrix.os }}
-    
+
     steps:
       - name: Checkout Code
         uses: actions/checkout@v4
-        
+
       - name: Set up Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: 22 
-          
-      # --- Кэширование папки node_modules (для ускорения) ---
+          node-version: 22
+
       - name: Cache Node Modules
         uses: actions/cache@v4
         with:
@@ -37,38 +33,52 @@ jobs:
           key: ${{ runner.os }}-node-${{ hashFiles('**/package-lock.json') }}
           restore-keys: |
             ${{ runner.os }}-node-
-            
-      # ----------------------------------------------------------------------
-      # Установка в два этапа для стабильности
-      # ----------------------------------------------------------------------
+
       - name: Install Dependencies (Non-Native)
-        # Установка ВСЕХ зависимостей (включая нативные, но без их сборки)
         run: npm install --ignore-scripts --unsafe-perm --timing --no-progress
-        
+
       - name: Rebuild Native Modules (for Electron stability)
-        # Использование официального инструмента electron-builder для корректной пересборки keytar
         run: npx electron-builder install-app-deps
-        
-      # ----------------------------------------------------------------------
-      # Шаг сборки для всех платформ
-      # ----------------------------------------------------------------------
+
       - name: Build Electron App (Dist)
-        # Используем "--publish never", чтобы полностью отключить публикацию electron-builder 
-        # Флаг "--" необходим для передачи аргументов в скрипт npm.
         run: npm run dist -- --publish never
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          # Отключает автопоиск сертификатов для подписи, который не нужен в CI.
           CSC_IDENTITY_AUTO_DISCOVERY: false
-        
-      # ----------------------------------------------------------------------
-      # Загрузка артефактов
-      # ----------------------------------------------------------------------
-      - name: Upload Artifacts (Windows, Mac, Linux)
+
+      - name: Upload Artifacts
         uses: actions/upload-artifact@v4
         with:
-          # Используем имя файла, соответствующее ОС для легкой идентификации
           name: ${{ matrix.os }}-build-artifacts
-          # Папка, указанная в вашем package.json
           path: release/
           retention-days: 7
+
+  release:
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts/
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.ref_name }}
+          name: Release ${{ github.ref_name }}
+          draft: false
+          prerelease: false
+          files: |
+            artifacts/**/*.exe
+            artifacts/**/*.dmg
+            artifacts/**/*.AppImage
+            artifacts/**/*.deb
+            artifacts/**/*.rpm
+            artifacts/**/*.zip
+            artifacts/**/*.tar.gz
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
