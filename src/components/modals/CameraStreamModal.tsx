@@ -1,7 +1,20 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import Hls from 'hls.js';
-import { YandexDevice, CameraStreamResult } from '../../types/index';
+import { YandexDevice, CameraStreamResult, YandexWebRtcRoom } from '../../types/index';
 import { connectYandexGoloomWebRtc, GoloomConnection } from '../../services/yandexGoloomWebRtc';
+
+/** Returns false if the room JWT is expired or will expire within 15 s. */
+const isRoomCredentialFresh = (room: YandexWebRtcRoom): boolean => {
+  try {
+    const b64 = room.credentials.split('.')[1]?.replace(/-/g, '+').replace(/_/g, '/');
+    if (!b64) return true;
+    const payload = JSON.parse(atob(b64)) as Record<string, unknown>;
+    if (typeof payload.exp !== 'number') return true;
+    return payload.exp * 1000 > Date.now() + 15000;
+  } catch {
+    return true;
+  }
+};
 import { getQuasarCameraDevice } from '../../services/yandexIoT';
 import {
   hasCameraPrivacyControl,
@@ -42,6 +55,7 @@ export const CameraStreamModal: React.FC<CameraStreamModalProps> = ({
   const reconnectTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const qualityMenuRef = useRef<HTMLDivElement>(null);
   const selectedQualityRef = useRef<QualityPreset>(QUALITY_PRESETS[0]);
+  const prevPrivacyRef = useRef(false);
   const [cameraDevice, setCameraDevice] = useState<YandexDevice>(device);
   const [isLoading, setIsLoading] = useState(false);
   const [isTogglingPrivacy, setIsTogglingPrivacy] = useState(false);
@@ -96,6 +110,9 @@ export const CameraStreamModal: React.FC<CameraStreamModalProps> = ({
       if (reconnectTimerRef.current) clearTimeout(reconnectTimerRef.current);
       if (hlsRef.current) { hlsRef.current.destroy(); hlsRef.current = null; }
       if (webrtcConnectionRef.current) { webrtcConnectionRef.current.cleanupSoft(); webrtcConnectionRef.current = null; }
+      // Clear stale error so the overlay doesn't stay on top of a recovered stream
+      setError(null);
+      setPrivacyNotice(null);
     }
 
     try {
@@ -111,23 +128,30 @@ export const CameraStreamModal: React.FC<CameraStreamModalProps> = ({
         lastWebrtcRoomRef.current = stream.webrtc;
         const onDisconnect = () => {
           if (reconnectTimerRef.current) clearTimeout(reconnectTimerRef.current);
+          // 3 s grace period so the server has time to release the old peer slot
+          // (prevents "too many peers" when the camera firmware has a small peer limit)
           reconnectTimerRef.current = setTimeout(async () => {
             reconnectTimerRef.current = null;
             const v = videoRef.current;
             if (!v) return;
-            // Fast path: reuse cached room credentials (same room_id, no HTTP call)
+            // Fast path: reuse cached room credentials ONLY if the JWT is still fresh.
+            // If it has expired (that's why the server closed the WS), skip straight to
+            // the full HTTP reconnect so we get new credentials.
             const cached = lastWebrtcRoomRef.current;
-            if (cached) {
+            if (cached && isRoomCredentialFresh(cached)) {
               if (webrtcConnectionRef.current) { webrtcConnectionRef.current.cleanupSoft(); webrtcConnectionRef.current = null; }
               try {
                 webrtcConnectionRef.current = await connectYandexGoloomWebRtc(cached, v, onDisconnect, selectedQualityRef.current);
                 return;
-              } catch {
-                // Fast path failed — fall back to full reconnect
+              } catch (err) {
+                // If server still busy (too many peers), wait another 3 s then do full reconnect
+                const isBusy = err instanceof Error && /слишком много|too.?many/i.test(err.message);
+                if (isBusy) await new Promise(r => window.setTimeout(r, 3000));
+                // Fall back to full reconnect
               }
             }
             loadStreamRef.current?.(true);
-          }, 300);
+          }, 3000);
         };
         webrtcConnectionRef.current = await connectYandexGoloomWebRtc(stream.webrtc, video, onDisconnect, selectedQualityRef.current);
         return;
@@ -242,6 +266,43 @@ export const CameraStreamModal: React.FC<CameraStreamModalProps> = ({
   useEffect(() => {
     loadStreamRef.current = loadStream;
   });
+
+  // While streaming: poll every 20 s to catch physical privacy-button presses.
+  // While privacy is ON (no stream): poll every 5 s waiting for it to be lifted,
+  // then auto-reconnect so the user doesn't have to press "Повторить" manually.
+  useEffect(() => {
+    if (!isOpen || isLoading) return;
+
+    const isWaitingForPrivacy = privacyEnabled && !streamProtocol && !error;
+    const interval = isWaitingForPrivacy ? 5000 : 20000;
+
+    const poll = setInterval(async () => {
+      await refreshCameraDevice();
+      // Auto-reconnect is handled by the privacyEnabled-change effect below
+    }, interval);
+
+    return () => clearInterval(poll);
+  }, [isOpen, streamProtocol, isLoading, error, privacyEnabled, refreshCameraDevice]);
+
+  // React when privacy state changes mid-session.
+  useEffect(() => {
+    const wasEnabled = prevPrivacyRef.current;
+    prevPrivacyRef.current = privacyEnabled;
+
+    if (!wasEnabled && privacyEnabled && streamProtocol && !isLoading) {
+      // Privacy just turned ON while streaming → stop stream, wait for it to be lifted
+      cleanupPlayer();
+      setStreamProtocol(null);
+      setError(null);
+      setPrivacyNotice('Режим приватности включён. Камера не передаёт видео.');
+    }
+
+    if (wasEnabled && !privacyEnabled && !streamProtocol && !isLoading && isOpen) {
+      // Privacy just turned OFF while we were waiting → auto-reconnect
+      setPrivacyNotice(null);
+      loadStreamRef.current?.();
+    }
+  }, [privacyEnabled, streamProtocol, isLoading, isOpen, cleanupPlayer]);
 
   useEffect(() => {
     if (!isOpen) {

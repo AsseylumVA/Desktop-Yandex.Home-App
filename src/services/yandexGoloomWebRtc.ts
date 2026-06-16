@@ -2,9 +2,30 @@ import { YandexWebRtcRoom } from '../types/index';
 
 const CONNECTION_TIMEOUT_MS = 90000;
 const VIDEO_TIMEOUT_MS = 30000;
+/** Interval for application-level pings to prevent NAT/idle WS timeouts */
+const KEEPALIVE_INTERVAL_MS = 25000;
+/** Refresh credentials this many ms before JWT expiry */
+const JWT_REFRESH_LEAD_MS = 30000;
 
 const log = (...args: unknown[]) => console.log('[Goloom]', ...args);
 const logErr = (...args: unknown[]) => console.error('[Goloom]', ...args);
+
+/**
+ * Decode the `exp` field of a JWT (returns ms-since-epoch or null if not decodable).
+ * Works for standard JWT and Yandex Goloom room tokens.
+ */
+const decodeJwtExp = (jwt: string): number | null => {
+    try {
+        const parts = jwt.split('.');
+        if (parts.length < 2) return null;
+        // base64url → base64
+        const b64 = parts[1].replace(/-/g, '+').replace(/_/g, '/');
+        const payload = JSON.parse(atob(b64)) as Record<string, unknown>;
+        return typeof payload.exp === 'number' ? payload.exp * 1000 : null;
+    } catch {
+        return null;
+    }
+};
 
 const waitForWsOpen = (ws: WebSocket) => new Promise<void>((resolve, reject) => {
     if (ws.readyState === WebSocket.OPEN) {
@@ -145,11 +166,15 @@ const handleSignalingMessage = async (
         const cfg = msg.slotsConfig as {
             slots?: Array<{ participantVideoByMid?: { mid?: string; limitationReason?: string } }>;
         } | undefined;
-        // Extract video mid from first slot with non-empty mid
         const slot = cfg?.slots?.find(s => s.participantVideoByMid?.mid);
         const mid = slot?.participantVideoByMid?.mid ?? '';
         const limitation = slot?.participantVideoByMid?.limitationReason ?? '';
-        log('slotsConfig received: mid=', mid || '(empty)', '| limitationReason=', limitation || '(none)');
+        // Only log when mid or limitation actually changes to avoid flooding the console
+        const sigKey = `${mid}|${limitation}`;
+        if ((handleSignalingMessage as { _lastSlotsKey?: string })._lastSlotsKey !== sigKey) {
+            (handleSignalingMessage as { _lastSlotsKey?: string })._lastSlotsKey = sigKey;
+            log('slotsConfig: mid=', mid || '(empty)', '| limitationReason=', limitation || '(none)');
+        }
         onSlotsConfig?.(mid);
     }
 
@@ -194,6 +219,21 @@ const handleSignalingMessage = async (
         }
     }
 
+    // Detect server error messages mid-session (e.g. too many peers, room closed)
+    if ('error' in msg || 'serverError' in msg || 'errorMessage' in msg) {
+        const errPayload = msg.error ?? msg.serverError ?? msg.errorMessage;
+        if (errPayload) {
+            const reason = typeof errPayload === 'string' ? errPayload : JSON.stringify(errPayload);
+            logErr('Server error message:', reason);
+            const isTooManyPeers = /too.?many.?peer/i.test(reason);
+            throw new Error(
+                isTooManyPeers
+                    ? 'Слишком много подключений к камере — подождите несколько секунд и повторите'
+                    : `Ошибка сервера: ${reason}`,
+            );
+        }
+    }
+
     if (msg.uid && msg.ack == null) {
         sendAck(ws, String(msg.uid));
     }
@@ -226,9 +266,15 @@ export const connectYandexGoloomWebRtc = async (
     let slotsConfigResolve: ((mid: string) => void) | null = null;
     const slotsConfigPromise = new Promise<string>(resolve => { slotsConfigResolve = resolve; });
 
+    // Timers cleared on cleanup
+    let keepaliveIntervalId: ReturnType<typeof setInterval> | null = null;
+    let jwtRefreshTimerId: ReturnType<typeof setTimeout> | null = null;
+
     const doCleanup = (ws: WebSocket, pc: RTCPeerConnection, unexpected = false, keepVideo = false) => {
         if (closed) return;
         closed = true;
+        if (keepaliveIntervalId !== null) { window.clearInterval(keepaliveIntervalId); keepaliveIntervalId = null; }
+        if (jwtRefreshTimerId !== null) { window.clearTimeout(jwtRefreshTimerId); jwtRefreshTimerId = null; }
         log('Cleanup', keepVideo ? '(keeping video frame)' : '');
         pc.close();
         if (ws.readyState === WebSocket.OPEN || ws.readyState === WebSocket.CONNECTING) {
@@ -240,6 +286,12 @@ export const connectYandexGoloomWebRtc = async (
 
     log('Connecting to', room.serviceUrl);
     const ws = new WebSocket(room.serviceUrl);
+
+    // Log WS close details to diagnose why the connection drops
+    ws.addEventListener('close', (e) => {
+        log('WS closed — code:', e.code, '| reason:', e.reason || '(none)', '| wasClean:', e.wasClean);
+    });
+
     await waitForWsOpen(ws);
 
     const hello = {
@@ -269,7 +321,31 @@ export const connectYandexGoloomWebRtc = async (
     try {
         const sh = JSON.parse(serverHelloRaw) as Record<string, unknown>;
         log('serverHello keys:', Object.keys(sh).join(', '));
-    } catch {
+
+        // Detect server-side rejection (e.g. "too many peers")
+        const inner = (sh.serverHello ?? sh) as Record<string, unknown>;
+        const status = inner.status as Record<string, unknown> | undefined;
+        const errField = inner.error ?? sh.error;
+
+        let serverError: string | null = null;
+        if (status && status.code && status.code !== 'OK') {
+            serverError = String(status.reason ?? status.message ?? status.code);
+        } else if (errField) {
+            serverError = typeof errField === 'string' ? errField : JSON.stringify(errField);
+        }
+
+        if (serverError) {
+            logErr('serverHello rejected:', serverError);
+            doCleanup(ws, pc);
+            const isTooManyPeers = /too.?many.?peer/i.test(serverError);
+            throw new Error(
+                isTooManyPeers
+                    ? 'Слишком много подключений к камере — подождите несколько секунд и повторите'
+                    : `Сервер отклонил подключение: ${serverError}`,
+            );
+        }
+    } catch (e) {
+        if (e instanceof Error && (e.message.startsWith('Слишком') || e.message.startsWith('Сервер'))) throw e;
         log('serverHello (raw):', serverHelloRaw.slice(0, 200));
     }
 
@@ -463,6 +539,35 @@ export const connectYandexGoloomWebRtc = async (
         const isHighQualityRequest = initialQuality.width === 0 || initialQuality.width >= 1920;
         if (isHighQualityRequest) {
             window.setTimeout(() => { void upgradeToHighestQuality(); }, 1000);
+        }
+
+        // ── Keepalive ────────────────────────────────────────────────────────────
+        // Send a JSON ping every 25 s so NAT/firewalls and the Goloom server don't
+        // treat the signaling WS as idle and close it.
+        keepaliveIntervalId = window.setInterval(() => {
+            if (closed || ws.readyState !== WebSocket.OPEN) return;
+            ws.send(JSON.stringify({ uid: crypto.randomUUID(), ping: {} }));
+        }, KEEPALIVE_INTERVAL_MS);
+
+        // ── Proactive JWT refresh ─────────────────────────────────────────────
+        // The room credentials are a JWT with an `exp` claim.  When it expires the
+        // server closes the WS — causing the visible "reconnecting" flash.  We
+        // trigger a soft reconnect 30 s before expiry so the user never sees it.
+        const jwtExp = decodeJwtExp(room.credentials);
+        if (jwtExp !== null) {
+            const msLeft = jwtExp - Date.now();
+            const refreshIn = msLeft - JWT_REFRESH_LEAD_MS;
+            log(`JWT exp in ${Math.round(msLeft / 1000)} s — proactive refresh scheduled in ${Math.round(refreshIn / 1000)} s`);
+            if (refreshIn > 5000) {
+                jwtRefreshTimerId = window.setTimeout(() => {
+                    if (closed) return;
+                    log('JWT expiring soon — triggering proactive soft reconnect');
+                    doCleanup(ws, pc, false, true); // keep last video frame visible
+                    onDisconnect?.();
+                }, refreshIn);
+            }
+        } else {
+            log('JWT exp not found in credentials — relying on server-close for reconnect');
         }
 
         const setQuality = (width: number, height: number) => {
