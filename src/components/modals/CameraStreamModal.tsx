@@ -59,6 +59,9 @@ export const CameraStreamModal: React.FC<CameraStreamModalProps> = ({
   const scheduleReconnectRef = useRef<() => void>(() => {});
   const performSeamlessCredentialRefreshRef = useRef<(cleanupOld: () => void, connectionId: string) => Promise<void>>(async () => {});
   const refreshInFlightRef = useRef<Promise<YandexDevice> | null>(null);
+  /** Incremented on close/unmount — async work must match to continue. */
+  const sessionRef = useRef(0);
+  const pendingTimersRef = useRef<Set<ReturnType<typeof setTimeout>>>(new Set());
   const qualityMenuRef = useRef<HTMLDivElement>(null);
   const freezeCanvasRef = useRef<HTMLCanvasElement>(null);
   const selectedQualityRef = useRef<QualityPreset>(QUALITY_PRESETS[0]);
@@ -97,11 +100,43 @@ export const CameraStreamModal: React.FC<CameraStreamModalProps> = ({
 
   const PRIVACY_ON_NOTICE = 'Режим приватности включён. Камера не передаёт видео.';
 
-  const cleanupPlayer = useCallback(() => {
-    if (reconnectTimerRef.current) {
-      clearTimeout(reconnectTimerRef.current);
-      reconnectTimerRef.current = null;
+  const isSessionAlive = useCallback((session: number) => session === sessionRef.current, []);
+
+  const clearPendingTimers = useCallback(() => {
+    for (const id of pendingTimersRef.current) {
+      clearTimeout(id);
     }
+    pendingTimersRef.current.clear();
+    reconnectTimerRef.current = null;
+  }, []);
+
+  const scheduleSessionTimer = useCallback((
+    session: number,
+    fn: () => void,
+    delayMs: number,
+  ) => {
+    const id = window.setTimeout(() => {
+      pendingTimersRef.current.delete(id);
+      if (!isSessionAlive(session)) return;
+      fn();
+    }, delayMs);
+    pendingTimersRef.current.add(id);
+    return id;
+  }, [isSessionAlive]);
+
+  const abortStreamSession = useCallback(() => {
+    sessionRef.current += 1;
+    clearPendingTimers();
+    credentialRefreshInFlightRef.current = false;
+    activeConnectionIdRef.current = null;
+    lastWebrtcRoomRef.current = null;
+    loadStreamRef.current = null;
+    performSeamlessCredentialRefreshRef.current = async () => {};
+    scheduleReconnectRef.current = () => {};
+  }, [clearPendingTimers]);
+
+  const cleanupPlayer = useCallback(() => {
+    abortStreamSession();
     if (hlsRef.current) {
       hlsRef.current.destroy();
       hlsRef.current = null;
@@ -123,9 +158,7 @@ export const CameraStreamModal: React.FC<CameraStreamModalProps> = ({
     if (stagingVideoRef.current) {
       stagingVideoRef.current.srcObject = null;
     }
-    credentialRefreshInFlightRef.current = false;
-    activeConnectionIdRef.current = null;
-  }, []);
+  }, [abortStreamSession]);
 
   const reportStreamError = useCallback((message: string) => {
     setError(message);
@@ -144,6 +177,7 @@ export const CameraStreamModal: React.FC<CameraStreamModalProps> = ({
   }, [cleanupPlayer]);
 
   const refreshCameraDevice = useCallback(async (options?: { retry?: boolean }): Promise<YandexDevice> => {
+    const session = sessionRef.current;
     if (refreshInFlightRef.current) {
       return refreshInFlightRef.current;
     }
@@ -151,10 +185,12 @@ export const CameraStreamModal: React.FC<CameraStreamModalProps> = ({
     const task = (async () => {
       try {
         const quasarDevice = await getQuasarCameraDevice(device.id, options);
+        if (!isSessionAlive(session)) return device;
         const merged = mergeCameraDeviceState(device, quasarDevice);
         setCameraDevice(merged);
         return merged;
       } catch {
+        if (!isSessionAlive(session)) return device;
         if (options?.retry !== false) {
           setCameraDevice(device);
         }
@@ -170,9 +206,14 @@ export const CameraStreamModal: React.FC<CameraStreamModalProps> = ({
         refreshInFlightRef.current = null;
       }
     }
-  }, [device]);
+  }, [device, isSessionAlive]);
 
   const performSeamlessCredentialRefresh = useCallback(async (cleanupOld: () => void, connectionId: string) => {
+    const session = sessionRef.current;
+    if (!isSessionAlive(session)) {
+      cleanupOld();
+      return;
+    }
     if (activeConnectionIdRef.current !== connectionId) {
       cleanupOld();
       return;
@@ -189,6 +230,7 @@ export const CameraStreamModal: React.FC<CameraStreamModalProps> = ({
       err instanceof Error && /слишком много|too.?many/i.test(err.message);
 
     const failRefresh = (err: unknown, cleanupOldConn: boolean) => {
+      if (!isSessionAlive(session)) return;
       const message = err instanceof Error ? err.message : 'Не удалось обновить видеопоток';
       if (cleanupOldConn) {
         cleanupOld();
@@ -207,6 +249,9 @@ export const CameraStreamModal: React.FC<CameraStreamModalProps> = ({
       }
 
       const stream = await onGetStream(device.id);
+      if (!isSessionAlive(session)) {
+        return;
+      }
       if (stream.protocol !== 'webrtc' || !stream.webrtc) {
         throw new Error('WebRTC room not available');
       }
@@ -223,7 +268,7 @@ export const CameraStreamModal: React.FC<CameraStreamModalProps> = ({
         if (isTooManyPeers(err)) {
           stagingConn?.cleanup();
           retryScheduled = true;
-          window.setTimeout(() => {
+          scheduleSessionTimer(session, () => {
             credentialRefreshInFlightRef.current = false;
             void performSeamlessCredentialRefreshRef.current(cleanupOld, connectionId);
           }, TOO_MANY_PEERS_RETRY_MS);
@@ -232,7 +277,16 @@ export const CameraStreamModal: React.FC<CameraStreamModalProps> = ({
         throw err;
       }
 
+      if (!isSessionAlive(session)) {
+        stagingConn.cleanup();
+        return;
+      }
+
       await waitForVideoFrame(stagingVideo);
+      if (!isSessionAlive(session)) {
+        stagingConn.cleanup();
+        return;
+      }
 
       const newStream = stagingVideo.srcObject;
       if (!newStream) {
@@ -253,9 +307,10 @@ export const CameraStreamModal: React.FC<CameraStreamModalProps> = ({
       lastWebrtcRoomRef.current = stream.webrtc;
     } catch (err) {
       stagingConn?.cleanup();
+      if (!isSessionAlive(session)) return;
       if (isTooManyPeers(err)) {
         retryScheduled = true;
-        window.setTimeout(() => {
+        scheduleSessionTimer(session, () => {
           credentialRefreshInFlightRef.current = false;
           void performSeamlessCredentialRefreshRef.current(cleanupOld, connectionId);
         }, TOO_MANY_PEERS_RETRY_MS);
@@ -267,7 +322,7 @@ export const CameraStreamModal: React.FC<CameraStreamModalProps> = ({
         credentialRefreshInFlightRef.current = false;
       }
     }
-  }, [device.id, onGetStream, reportStreamError]);
+  }, [device.id, onGetStream, reportStreamError, isSessionAlive, scheduleSessionTimer]);
 
   useEffect(() => {
     performSeamlessCredentialRefreshRef.current = performSeamlessCredentialRefresh;
@@ -287,14 +342,18 @@ export const CameraStreamModal: React.FC<CameraStreamModalProps> = ({
       setStreamProtocol(null);
     } else {
       captureFreezeFrame();
-      if (reconnectTimerRef.current) clearTimeout(reconnectTimerRef.current);
-      if (hlsRef.current) { hlsRef.current.destroy(); hlsRef.current = null; }
+      clearPendingTimers();
       if (webrtcConnectionRef.current) { webrtcConnectionRef.current.cleanupSoft(); webrtcConnectionRef.current = null; }
       setPrivacyNotice(null);
     }
 
+    const session = sessionRef.current;
+    if (!isSessionAlive(session)) return;
+
     try {
       const stream = await onGetStream(device.id);
+      if (!isSessionAlive(session)) return;
+
       setStreamProtocol(stream.protocol);
       setError(null);
 
@@ -307,9 +366,10 @@ export const CameraStreamModal: React.FC<CameraStreamModalProps> = ({
         lastWebrtcRoomRef.current = stream.webrtc;
 
         const scheduleReconnect = () => {
-          if (reconnectTimerRef.current) clearTimeout(reconnectTimerRef.current);
-          reconnectTimerRef.current = setTimeout(async () => {
+          if (!isSessionAlive(session)) return;
+          reconnectTimerRef.current = scheduleSessionTimer(session, async () => {
             reconnectTimerRef.current = null;
+            if (!isSessionAlive(session)) return;
             const v = videoRef.current;
             if (!v) return;
             const cached = lastWebrtcRoomRef.current;
@@ -318,16 +378,27 @@ export const CameraStreamModal: React.FC<CameraStreamModalProps> = ({
               try {
                 const conn = await connectYandexGoloomWebRtc(
                   cached, v, () => scheduleReconnect(), selectedQualityRef.current,
-                  (oldCleanup, connId) => { void performSeamlessCredentialRefreshRef.current(oldCleanup, connId); },
+                  (oldCleanup, connId) => {
+                    if (!isSessionAlive(session)) return;
+                    void performSeamlessCredentialRefreshRef.current(oldCleanup, connId);
+                  },
                 );
+                if (!isSessionAlive(session)) {
+                  conn.cleanup();
+                  return;
+                }
                 webrtcConnectionRef.current = conn;
                 activeConnectionIdRef.current = conn.id;
                 return;
               } catch (err) {
+                if (!isSessionAlive(session)) return;
                 lastWebrtcRoomRef.current = null;
                 const isBusy = err instanceof Error && /слишком много|too.?many/i.test(err.message);
                 if (isBusy) {
-                  await new Promise(r => window.setTimeout(r, 3000));
+                  await new Promise<void>((resolve) => {
+                    scheduleSessionTimer(session, resolve, 3000);
+                  });
+                  if (!isSessionAlive(session)) return;
                   loadStreamRef.current?.(true);
                   return;
                 }
@@ -335,6 +406,7 @@ export const CameraStreamModal: React.FC<CameraStreamModalProps> = ({
                 return;
               }
             }
+            if (!isSessionAlive(session)) return;
             loadStreamRef.current?.(true);
           }, 3000);
         };
@@ -345,8 +417,15 @@ export const CameraStreamModal: React.FC<CameraStreamModalProps> = ({
           video,
           () => scheduleReconnect(),
           selectedQualityRef.current,
-          (oldCleanup, connId) => { void performSeamlessCredentialRefreshRef.current(oldCleanup, connId); },
+          (oldCleanup, connId) => {
+            if (!isSessionAlive(session)) return;
+            void performSeamlessCredentialRefreshRef.current(oldCleanup, connId);
+          },
         );
+        if (!isSessionAlive(session)) {
+          conn.cleanup();
+          return;
+        }
         webrtcConnectionRef.current = conn;
         activeConnectionIdRef.current = conn.id;
         return;
@@ -383,15 +462,18 @@ export const CameraStreamModal: React.FC<CameraStreamModalProps> = ({
         });
       }
     } catch (err) {
+      if (!isSessionAlive(session)) return;
       const message = err instanceof Error ? err.message : 'Не удалось получить видеопоток';
       if (privacyEnabled || message.includes('приват') || message.includes('не умеет')) {
         setPrivacyNotice('Камера может быть в режиме приватности. Отключите его кнопкой ниже.');
       }
       reportStreamError(message);
     } finally {
-      setIsLoading(false);
+      if (isSessionAlive(session)) {
+        setIsLoading(false);
+      }
     }
-  }, [cleanupPlayer, device.id, onGetStream, privacyEnabled, captureFreezeFrame, enterPrivacyWaitingState, reportStreamError]);
+  }, [cleanupPlayer, clearPendingTimers, device.id, onGetStream, privacyEnabled, captureFreezeFrame, enterPrivacyWaitingState, reportStreamError, isSessionAlive, scheduleSessionTimer]);
 
   const handleTogglePrivacy = useCallback(async () => {
     setIsTogglingPrivacy(true);
@@ -511,15 +593,17 @@ export const CameraStreamModal: React.FC<CameraStreamModalProps> = ({
   useEffect(() => {
     if (!isOpen || isLoading) return;
 
+    const session = sessionRef.current;
     const isWaitingForPrivacy = privacyEnabled && !streamProtocol && !error;
     const interval = isWaitingForPrivacy ? 5000 : 20000;
 
     const poll = setInterval(() => {
+      if (!isSessionAlive(session)) return;
       void refreshCameraDevice({ retry: false });
     }, interval);
 
     return () => clearInterval(poll);
-  }, [isOpen, streamProtocol, isLoading, error, privacyEnabled, refreshCameraDevice]);
+  }, [isOpen, streamProtocol, isLoading, error, privacyEnabled, refreshCameraDevice, isSessionAlive]);
 
   // React when privacy state changes mid-session.
   useEffect(() => {
@@ -550,7 +634,7 @@ export const CameraStreamModal: React.FC<CameraStreamModalProps> = ({
       return;
     }
 
-    let cancelled = false;
+    const session = sessionRef.current;
 
     const openStream = async () => {
       if (isCameraPrivacyModeEnabled(device)) {
@@ -560,7 +644,7 @@ export const CameraStreamModal: React.FC<CameraStreamModalProps> = ({
       }
 
       const refreshedDevice = await refreshCameraDevice({ retry: true });
-      if (cancelled) {
+      if (!isSessionAlive(session)) {
         return;
       }
 
@@ -575,11 +659,13 @@ export const CameraStreamModal: React.FC<CameraStreamModalProps> = ({
     void openStream();
 
     return () => {
-      cancelled = true;
       cleanupPlayer();
     };
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isOpen]);
+
+  // Final safety net when Dashboard unmounts the modal entirely
+  useEffect(() => () => { cleanupPlayer(); }, [cleanupPlayer]);
 
   if (!isOpen) {
     return null;
