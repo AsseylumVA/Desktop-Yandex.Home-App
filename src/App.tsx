@@ -91,7 +91,7 @@ function App() {
   const [isAutostartEnabled, setIsAutostartEnabled] = useState<boolean>(false);
   
   // Состояние для отслеживания повторных попыток подключения
-  const [retryInfo, setRetryInfo] = useState<{attempt: number, maxAttempts: number, message: string} | null>(null);
+  const [retryInfo, setRetryInfo] = useState<{action: string, attempt: number, maxAttempts: number, message: string} | null>(null);
 
   // Состояние для уведомления об обновлении
   const [showUpdateNotification, setShowUpdateNotification] = useState<boolean>(false);
@@ -104,6 +104,11 @@ function App() {
   useEffect(() => {
     userDataRef.current = userData;
   }, [userData]);
+
+  const appStateRef = useRef(appState);
+  useEffect(() => {
+    appStateRef.current = appState;
+  }, [appState]);
 
 	// --- Уведомления ---
 	const showNotification = useCallback((message: string, type: 'error' | 'success' = 'error') => {
@@ -185,7 +190,7 @@ function App() {
 			setIsRefreshing(true);
 		}
     		try {
-     		const data = await fetchUserInfo(apiToken);
+     		const data = await fetchUserInfo(apiToken, { retry: !silent });
      		const sortedData = stableSortData(data);
      		
      		// Проверяем, есть ли изменения в состоянии устройств
@@ -266,6 +271,7 @@ function App() {
 	const loadData = useCallback(async (apiToken: string) => {
 		setAppState(AppState.LOADING);
 		setErrorMsg(undefined);
+		setRetryInfo(null);
 		try {
 		  const data = await fetchUserInfo(apiToken);
 		  const sortedData = stableSortData(data);
@@ -278,6 +284,7 @@ function App() {
             return households.length > 0 ? households[0].id : null;
           });
 		  setAppState(AppState.DASHBOARD);
+      setRetryInfo(null);
       await promptXTokenIfNeeded(sortedData);
 		} catch (err: unknown) {
 		  if (err instanceof Error) {
@@ -541,36 +548,7 @@ function App() {
       if (storedToken) {
         console.log('[App] Token found, loading user data...');
         setToken(storedToken);
-        try {
-          const data = await fetchUserInfo(storedToken);
-          console.log('[App] User data loaded successfully');
-          const sortedData = stableSortData(data);
-          setUserData(sortedData);
-          const households = sortedData.households || [];
-          setActiveHouseholdId(prev => {
-            if (prev && households.some(h => h.id === prev)) {
-              return prev;
-            }
-            return households.length > 0 ? households[0].id : null;
-          });
-          console.log('[App] Setting state to DASHBOARD');
-          setAppState(AppState.DASHBOARD);
-          await promptXTokenIfNeeded(sortedData);
-        } catch (err) {
-          console.error('[App] Error loading user data:', err);
-          if (err instanceof Error) {
-            setErrorMsg(err.message);
-          } else {
-            setErrorMsg('Ошибка при загрузке данных');
-          }
-          // Если ошибка авторизации, очищаем невалидный токен
-          if (err instanceof Error && (err.message.includes('401') || err.message.includes('403'))) {
-            await yandexApi.deleteSecureToken();
-            setToken(null);
-          }
-          console.log('[App] Setting state to AUTH due to error');
-          setAppState(AppState.AUTH);
-        }
+        await loadData(storedToken);
       } else {
         console.log('[App] No token found, setting state to AUTH');
         setAppState(AppState.AUTH);
@@ -578,7 +556,7 @@ function App() {
     };
     
     checkToken();
-  }, [promptXTokenIfNeeded]); // Пустой массив зависимостей - запускаем только один раз при монтировании
+  }, [loadData, promptXTokenIfNeeded]);
 
 	// --- 1.1 useEffect: Слушаем события повторных попыток подключения ---
 	useEffect(() => {
@@ -587,8 +565,19 @@ function App() {
 			return;
 		}
 
-		const unsubscribe = window.api.onRetryAttempt((data: {attempt: number, maxAttempts: number, message: string}) => {
-			setRetryInfo(data);
+		const unsubscribe = window.api.onRetryAttempt((data) => {
+			if (appStateRef.current !== AppState.LOADING) {
+				return;
+			}
+			if (data.action !== 'fetchUserInfo') {
+				return;
+			}
+			setRetryInfo((prev) => {
+				if (prev && data.attempt < prev.attempt) {
+					return prev;
+				}
+				return data;
+			});
 		});
 
 		// Очистка слушателя при размонтировании компонента

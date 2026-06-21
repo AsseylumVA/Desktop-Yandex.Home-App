@@ -83,26 +83,31 @@ const withRetry = async (asyncFn, onRetryAttempt = null) => {
     throw lastError;
 };
 
-// 1. Получение информации о пользователе
-export const fetchUserInfo = async (token, onRetryAttempt = null) => {
-    return withRetry(async () => {
-        const response = await fetch(`${BASE_URL}/user/info`, {
-            method: 'GET',
-            headers: {
-                'Authorization': `Bearer ${token}`,
-                'Content-Type': 'application/json',
-            },
-        });
+const fetchUserInfoOnce = async (token) => {
+    const response = await fetch(`${BASE_URL}/user/info`, {
+        method: 'GET',
+        headers: {
+            'Authorization': `Bearer ${token}`,
+            'Content-Type': 'application/json',
+        },
+    });
 
-        if (!response.ok) {
-            if (response.status === 401 || response.status === 403) {
-                throw new Error('Ошибка авторизации. Проверьте ваш токен.');
-            }
-            throw new Error(`Ошибка загрузки данных: ${response.status} ${response.statusText}`);
+    if (!response.ok) {
+        if (response.status === 401 || response.status === 403) {
+            throw new Error('Ошибка авторизации. Проверьте ваш токен.');
         }
+        throw new Error(`Ошибка загрузки данных: ${response.status} ${response.statusText}`);
+    }
 
-        return await response.json();
-    }, onRetryAttempt);
+    return await response.json();
+};
+
+// 1. Получение информации о пользователе
+export const fetchUserInfo = async (token, onRetryAttempt = null, { retry = true } = {}) => {
+    if (!retry) {
+        return fetchUserInfoOnce(token);
+    }
+    return withRetry(() => fetchUserInfoOnce(token), onRetryAttempt);
 };
 
 // 1.1 Получение информации об устройстве по ID
@@ -349,8 +354,12 @@ const sendIotDeviceAction = async (token, deviceId, action, onRetryAttempt = nul
     }, onRetryAttempt);
 };
 
-export const getQuasarCameraDevice = async (xToken, deviceId, onRetryAttempt = null) => {
-    return withRetry(async () => getQuasarDevice(xToken, deviceId), onRetryAttempt);
+export const getQuasarCameraDevice = async (xToken, deviceId, onRetryAttempt = null, { retry = true } = {}) => {
+    const fn = () => getQuasarDevice(xToken, deviceId);
+    if (!retry) {
+        return fn();
+    }
+    return withRetry(fn, onRetryAttempt);
 };
 
 export const setCameraPrivacyMode = async (
