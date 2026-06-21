@@ -26,6 +26,20 @@ const getStoredXToken = () => keytar.getPassword(SERVICE_NAME, ACCOUNT_NAME_X_TO
 const setStoredXToken = (xToken) => keytar.setPassword(SERVICE_NAME, ACCOUNT_NAME_X_TOKEN, xToken);
 const deleteStoredXToken = () => keytar.deletePassword(SERVICE_NAME, ACCOUNT_NAME_X_TOKEN);
 
+/** Coalesce concurrent identical API calls so retry counters are not reset. */
+const inflightRequests = new Map();
+
+const runSingleFlight = (key, fn) => {
+    if (inflightRequests.has(key)) {
+        return inflightRequests.get(key);
+    }
+    const promise = fn().finally(() => {
+        inflightRequests.delete(key);
+    });
+    inflightRequests.set(key, promise);
+    return promise;
+};
+
 const isDev = process.env.NODE_ENV === 'development' || !app.isPackaged;
 const DEV_VITE_URL = process.env.VITE_DEV_SERVER_URL || 'http://localhost:5173';
 
@@ -265,26 +279,35 @@ if (!gotTheLock) {
         createWindow();
         createTray(); // Создаем Tray
         
-        ipcMain.handle('yandex-api:fetchUserInfo', async (event, token) => {
-            try {
-                return await yandexApi.fetchUserInfo(token, makeRetryCallback('fetchUserInfo'));
-            } catch (error) {
-                throw new Error(error.message, { cause: error });
-            }
-        });
-
         const makeRetryCallback = (action) => {
             return (attempt, maxAttempts) => {
                 if (mainWindow && !mainWindow.isDestroyed()) {
                     mainWindow.webContents.send('yandex-api:retry-attempt', {
+                        action,
                         attempt,
                         maxAttempts,
-                        message: `Попытка повторного подключения ${attempt} из ${maxAttempts}...`
+                        message: `Попытка повторного подключения ${attempt} из ${maxAttempts}...`,
                     });
                 }
                 console.log(`${action}: повторная попытка ${attempt}/${maxAttempts}...`);
             };
         };
+
+        ipcMain.handle('yandex-api:fetchUserInfo', async (event, token, options = {}) => {
+            const retry = options.retry !== false;
+            const key = `fetchUserInfo:${token}:${retry}`;
+            try {
+                return await runSingleFlight(key, () =>
+                    yandexApi.fetchUserInfo(
+                        token,
+                        retry ? makeRetryCallback('fetchUserInfo') : null,
+                        { retry },
+                    ),
+                );
+            } catch (error) {
+                throw new Error(error.message, { cause: error });
+            }
+        });
 
         ipcMain.handle('yandex-api:executeScenario', async (event, token, scenarioId) => {
             try {
@@ -363,13 +386,22 @@ if (!gotTheLock) {
             }
         });
 
-        ipcMain.handle('yandex-api:getQuasarCameraDevice', async (event, deviceId) => {
+        ipcMain.handle('yandex-api:getQuasarCameraDevice', async (event, deviceId, options = {}) => {
+            const retry = options.retry !== false;
             try {
                 const xToken = await getStoredXToken();
                 if (!xToken) {
                     throw new Error('X_TOKEN_REQUIRED');
                 }
-                return await yandexApi.getQuasarCameraDevice(xToken, deviceId, makeRetryCallback('getQuasarCameraDevice'));
+                const key = `getQuasarCameraDevice:${deviceId}:${retry}`;
+                return await runSingleFlight(key, () =>
+                    yandexApi.getQuasarCameraDevice(
+                        xToken,
+                        deviceId,
+                        retry ? makeRetryCallback('getQuasarCameraDevice') : null,
+                        { retry },
+                    ),
+                );
             } catch (error) {
                 if (error.message?.includes('Quasar auth') || error.message?.includes('x-token')) {
                     await deleteStoredXToken();

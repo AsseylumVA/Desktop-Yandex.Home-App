@@ -6,6 +6,8 @@ const VIDEO_TIMEOUT_MS = 30000;
 const KEEPALIVE_INTERVAL_MS = 25000;
 /** Refresh credentials this many ms before JWT expiry */
 const JWT_REFRESH_LEAD_MS = 60000;
+/** Retry staging connect when server reports too many peers (overlap with old session) */
+const TOO_MANY_PEERS_RETRY_MS = 4000;
 /** Fast-path may reuse cached room JWT only if it remains valid at least this long */
 export const JWT_FAST_REUSE_MIN_TTL_MS = 90_000;
 
@@ -146,6 +148,8 @@ const waitForVideoFrame = (video: HTMLVideoElement) => new Promise<void>((resolv
     checkReady();
 });
 
+export { waitForVideoFrame, TOO_MANY_PEERS_RETRY_MS };
+
 const sendAck = (ws: WebSocket, uid: string) => {
     ws.send(JSON.stringify({ uid, ack: { status: { code: 'OK' } } }));
 };
@@ -242,6 +246,8 @@ const handleSignalingMessage = async (
 };
 
 export interface GoloomConnection {
+    /** Unique id — only the active connection should handle JWT refresh. */
+    id: string;
     /** Full cleanup — stops stream and clears the video element. */
     cleanup: () => void;
     /** Soft cleanup — stops the WebSocket/PeerConnection but keeps the last video frame visible. */
@@ -254,8 +260,9 @@ export const connectYandexGoloomWebRtc = async (
     video: HTMLVideoElement,
     onDisconnect?: () => void,
     initialQuality: { width: number; height: number } = { width: 2560, height: 1440 },
-    onCredentialRefresh?: () => void,
+    onCredentialRefresh?: (cleanupOld: () => void, connectionId: string) => void | Promise<void>,
 ): Promise<GoloomConnection> => {
+    const connectionId = crypto.randomUUID();
     const pendingCandidates: RTCIceCandidateInit[] = [];
     const state = { remoteDescSet: false };
     let closed = false;
@@ -273,12 +280,14 @@ export const connectYandexGoloomWebRtc = async (
     // Timers cleared on cleanup
     let keepaliveIntervalId: ReturnType<typeof setInterval> | null = null;
     let jwtRefreshTimerId: ReturnType<typeof setTimeout> | null = null;
+    let upgradeTimerId: ReturnType<typeof setTimeout> | null = null;
 
     const doCleanup = (ws: WebSocket, pc: RTCPeerConnection, unexpected = false, keepVideo = false) => {
         if (closed) return;
         closed = true;
         if (keepaliveIntervalId !== null) { window.clearInterval(keepaliveIntervalId); keepaliveIntervalId = null; }
         if (jwtRefreshTimerId !== null) { window.clearTimeout(jwtRefreshTimerId); jwtRefreshTimerId = null; }
+        if (upgradeTimerId !== null) { window.clearTimeout(upgradeTimerId); upgradeTimerId = null; }
         log('Cleanup', keepVideo ? '(keeping video frame)' : '');
         pc.close();
         if (ws.readyState === WebSocket.OPEN || ws.readyState === WebSocket.CONNECTING) {
@@ -286,6 +295,32 @@ export const connectYandexGoloomWebRtc = async (
         }
         if (!keepVideo) video.srcObject = null;
         if (unexpected) onDisconnect?.();
+    };
+
+    /** Read frame width via track settings or inbound-rtp stats — no extra <video> elements. */
+    const probeTrackFrameWidth = async (track: MediaStreamTrack, rtpPc: RTCPeerConnection): Promise<number> => {
+        if (closed) return 0;
+
+        const settings = track.getSettings?.();
+        if (settings?.width && settings.width > 0) {
+            return settings.width;
+        }
+
+        const receiver = rtpPc.getReceivers().find(r => r.track?.id === track.id);
+        if (!receiver) return 0;
+
+        for (let attempt = 0; attempt < 10; attempt++) {
+            if (closed) return 0;
+            const stats = await receiver.getStats();
+            for (const report of stats.values()) {
+                if (report.type === 'inbound-rtp' && report.kind === 'video') {
+                    const w = (report as RTCInboundRtpStreamStats).frameWidth;
+                    if (w && w > 0) return w;
+                }
+            }
+            await new Promise(r => window.setTimeout(r, 200));
+        }
+        return 0;
     };
 
     log('Connecting to', room.serviceUrl);
@@ -340,7 +375,8 @@ export const connectYandexGoloomWebRtc = async (
 
         if (serverError) {
             logErr('serverHello rejected:', serverError);
-            doCleanup(ws, pc);
+            closed = true;
+            ws.close();
             const isTooManyPeers = /too.?many.?peer/i.test(serverError);
             throw new Error(
                 isTooManyPeers
@@ -362,6 +398,7 @@ export const connectYandexGoloomWebRtc = async (
     log('RTCPeerConnection created');
 
     pc.ontrack = (event) => {
+        if (closed) return;
         const t = event.track;
         const txMid = event.transceiver?.mid ?? '';
         log('ontrack kind:', t.kind, '| mid:', txMid || '(empty)', '| id:', t.id.slice(0, 8), '| enabled:', t.enabled, '| readyState:', t.readyState, '| streams:', event.streams.length);
@@ -369,22 +406,7 @@ export const connectYandexGoloomWebRtc = async (
             const stream = event.streams[0] ?? new MediaStream([t]);
             videoStreams.set(txMid, stream);
             log('Stored video stream for mid:', txMid || '(empty)', '| stream id:', stream.id.slice(0, 8));
-            // Log sub-stream resolution when available
-            if (txMid === 'video_AB') {
-                const tmpVid = document.createElement('video');
-                tmpVid.muted = true;
-                tmpVid.srcObject = stream;
-                const logAndCleanup = () => {
-                    log('video_AB resolution:', tmpVid.videoWidth, 'x', tmpVid.videoHeight);
-                    tmpVid.srcObject = null;
-                };
-                tmpVid.addEventListener('loadedmetadata', logAndCleanup, { once: true });
-                tmpVid.addEventListener('resize', logAndCleanup, { once: true });
-                tmpVid.load();
-            }
-            // Always set srcObject from the first arriving video track so stale
-            // tracks from a previous soft-cleanup connection don't remain visible.
-            if (videoStreams.size === 1) {
+            if (videoStreams.size === 1 && !closed) {
                 log('Setting initial srcObject from first video track');
                 video.srcObject = stream;
                 video.muted = false;
@@ -394,8 +416,6 @@ export const connectYandexGoloomWebRtc = async (
             log('Stored audio track, total:', audioTracks.length);
         }
         t.addEventListener('ended', () => logErr('track ended, kind:', t.kind, '| mid:', txMid));
-        t.addEventListener('mute', () => log('track muted, kind:', t.kind, '| mid:', txMid));
-        t.addEventListener('unmute', () => log('track unmuted, kind:', t.kind, '| mid:', txMid));
     };
 
     pc.onicecandidate = (event) => {
@@ -487,44 +507,38 @@ export const connectYandexGoloomWebRtc = async (
                     log('Added audio track to combined stream, id:', at.id.slice(0, 8));
                 }
                 log('Switching srcObject to combined stream: video+', audioTracks.length, 'audio track(s)');
-                video.srcObject = combined;
-                video.muted = false;
+                if (!closed) {
+                    video.srcObject = combined;
+                    video.muted = false;
+                }
             }
         }
 
-        // Probe all available video streams and pick the highest-resolution one.
-        // The server may assign a lower-resolution stream as the "primary" slot.
-        const probeVideoWidth = (stream: MediaStream): Promise<number> =>
-            new Promise(resolve => {
-                const tmp = document.createElement('video');
-                tmp.muted = true;
-                tmp.srcObject = stream;
-                const done = () => { resolve(tmp.videoWidth); tmp.srcObject = null; };
-                tmp.addEventListener('loadedmetadata', done, { once: true });
-                tmp.addEventListener('resize', done, { once: true });
-                tmp.load();
-                window.setTimeout(() => { resolve(0); tmp.srcObject = null; }, 3000);
-            });
-
-        // Run probing in background after play; switches srcObject if a better stream exists
+        // Probe available streams and pick the highest-resolution track (via getStats, not temp <video>).
         const upgradeToHighestQuality = async () => {
             if (closed) return;
             let bestWidth = video.videoWidth;
             let bestTrack: MediaStreamTrack | undefined;
+            let bestMid = '';
             for (const [mid, stream] of videoStreams) {
+                if (closed) return;
                 const track = stream.getVideoTracks()[0];
                 if (!track || track.readyState !== 'live') continue;
-                const w = await probeVideoWidth(stream);
+                const w = await probeTrackFrameWidth(track, pc);
+                if (closed) return;
                 log('Probed mid:', mid, '→', w, 'x (current best:', bestWidth, ')');
-                if (w > bestWidth) { bestWidth = w; bestTrack = track; }
+                if (w > bestWidth) {
+                    bestWidth = w;
+                    bestTrack = track;
+                    bestMid = mid;
+                }
             }
-            if (bestTrack && !closed) {
-                log('Upgrading to higher quality track, width:', bestWidth);
-                const combined = new MediaStream([bestTrack, ...audioTracks]);
-                video.srcObject = combined;
-                video.muted = false;
-                try { await video.play(); } catch { /* ignore */ }
-            }
+            if (!bestTrack || closed) return;
+            log('Upgrading to higher quality track, mid:', bestMid, 'width:', bestWidth);
+            const combined = new MediaStream([bestTrack, ...audioTracks]);
+            video.srcObject = combined;
+            video.muted = false;
+            try { await video.play(); } catch { /* ignore */ }
         };
 
         log('video state BEFORE play:', video.srcObject ? `stream(${(video.srcObject as MediaStream).getTracks().map(t => `${t.kind}:${t.readyState}:enabled=${t.enabled}`).join(',')})` : 'null', '| readyState:', video.readyState, '| videoWidth:', video.videoWidth);
@@ -543,7 +557,7 @@ export const connectYandexGoloomWebRtc = async (
         // Auto-upgrade only when high quality was requested (not when user intentionally chose low)
         const isHighQualityRequest = initialQuality.width === 0 || initialQuality.width >= 1920;
         if (isHighQualityRequest) {
-            window.setTimeout(() => { void upgradeToHighestQuality(); }, 1000);
+            upgradeTimerId = window.setTimeout(() => { void upgradeToHighestQuality(); }, 1000);
         }
 
         // ── Keepalive ────────────────────────────────────────────────────────────
@@ -564,14 +578,21 @@ export const connectYandexGoloomWebRtc = async (
             log(`JWT exp in ${Math.round(msLeft / 1000)} s — proactive refresh scheduled in ${Math.round(refreshIn / 1000)} s`);
             const triggerCredentialRefresh = () => {
                 if (closed) return;
-                log('JWT expiring soon — triggering credential refresh reconnect');
+                log('JWT expiring soon — triggering seamless credential refresh');
                 intentionalClose = true;
+                const cleanupOld = () => doCleanup(ws, pc, false, true);
                 if (onCredentialRefresh) {
-                    onCredentialRefresh();
+                    void Promise.resolve(onCredentialRefresh(cleanupOld, connectionId)).catch((err) => {
+                        logErr('credential refresh failed:', err);
+                        if (!closed) {
+                            cleanupOld();
+                            onDisconnect?.();
+                        }
+                    });
                 } else {
+                    cleanupOld();
                     onDisconnect?.();
                 }
-                doCleanup(ws, pc, false, true);
             };
             if (refreshIn > 5000) {
                 jwtRefreshTimerId = window.setTimeout(triggerCredentialRefresh, refreshIn);
@@ -602,6 +623,7 @@ export const connectYandexGoloomWebRtc = async (
         };
 
         return {
+            id: connectionId,
             cleanup: () => doCleanup(ws, pc),
             cleanupSoft: () => doCleanup(ws, pc, false, true),
             setQuality,

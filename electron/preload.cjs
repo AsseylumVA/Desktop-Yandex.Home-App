@@ -3,7 +3,7 @@
 const { contextBridge, ipcRenderer } = require('electron');
 
 contextBridge.exposeInMainWorld('api', {
-    fetchUserInfo: (token) => ipcRenderer.invoke('yandex-api:fetchUserInfo', token),
+    fetchUserInfo: (token, options) => ipcRenderer.invoke('yandex-api:fetchUserInfo', token, options),
     executeScenario: (token, scenarioId) => ipcRenderer.invoke('yandex-api:executeScenario', token, scenarioId),
     toggleDevice: (token, deviceId, newState) => ipcRenderer.invoke('yandex-api:toggleDevice', token, deviceId, newState),
     toggleGroup: (token, groupId, deviceIds, newState) => ipcRenderer.invoke('yandex-api:toggleGroup', token, groupId, deviceIds, newState),
@@ -12,7 +12,7 @@ contextBridge.exposeInMainWorld('api', {
     getCameraStream: (deviceId) => ipcRenderer.invoke('yandex-api:getCameraStream', deviceId),
     setCameraPrivacyMode: (deviceId, privacyEnabled, toggleInstance) =>
         ipcRenderer.invoke('yandex-api:setCameraPrivacyMode', deviceId, privacyEnabled, toggleInstance),
-    getQuasarCameraDevice: (deviceId) => ipcRenderer.invoke('yandex-api:getQuasarCameraDevice', deviceId),
+    getQuasarCameraDevice: (deviceId, options) => ipcRenderer.invoke('yandex-api:getQuasarCameraDevice', deviceId, options),
 
     hasXToken: () => ipcRenderer.invoke('yandex-auth:hasXToken'),
     startQrAuth: () => ipcRenderer.invoke('yandex-auth:startQr'),

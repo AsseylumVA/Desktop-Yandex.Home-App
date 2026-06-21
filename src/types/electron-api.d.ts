@@ -1,8 +1,12 @@
 // electron-api.d.ts
 import { YandexUserInfoResponse, YandexDevice, TrayMenuItem, YandexModeAction, CameraStreamResult } from './index'; 
 
+export interface YandexApiRequestOptions {
+    retry?: boolean;
+}
+
 export interface IYandexApi {
-    fetchUserInfo: (token: string) => Promise<YandexUserInfoResponse>;
+    fetchUserInfo: (token: string, options?: YandexApiRequestOptions) => Promise<YandexUserInfoResponse>;
     fetchDevice: (token: string, deviceId: string) => Promise<YandexDevice>; 
     executeScenario: (token: string, scenarioId: string) => Promise<void>;
     toggleDevice: (token: string, deviceId: string, newState: boolean) => Promise<void>;
@@ -10,7 +14,7 @@ export interface IYandexApi {
     setDeviceMode: (token: string, deviceId: string, modeActions: YandexModeAction[], turnOn?: boolean) => Promise<void>;
     getCameraStream: (deviceId: string) => Promise<CameraStreamResult>;
     setCameraPrivacyMode: (deviceId: string, privacyEnabled: boolean, toggleInstance?: string) => Promise<void>;
-    getQuasarCameraDevice: (deviceId: string) => Promise<YandexDevice>;
+    getQuasarCameraDevice: (deviceId: string, options?: YandexApiRequestOptions) => Promise<YandexDevice>;
 	  getSecureToken: () => Promise<string | null>;
     setSecureToken: (token: string) => Promise<void>;
     deleteSecureToken: () => Promise<void>;
@@ -31,7 +35,7 @@ export interface IYandexApi {
     onTrayCommand: (callback: (command: string, id: string, currentState?: boolean) => void) => void;
     removeTrayCommandListener: () => void;
     
-    onRetryAttempt: (callback: (data: {attempt: number, maxAttempts: number, message: string}) => void) => () => void;
+    onRetryAttempt: (callback: (data: {action: string, attempt: number, maxAttempts: number, message: string}) => void) => () => void;
 }
 
 declare global {
