@@ -1,20 +1,8 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import Hls from 'hls.js';
 import { YandexDevice, CameraStreamResult, YandexWebRtcRoom } from '../../types/index';
-import { connectYandexGoloomWebRtc, GoloomConnection, JWT_FAST_REUSE_MIN_TTL_MS, waitForVideoFrame, TOO_MANY_PEERS_RETRY_MS } from '../../services/yandexGoloomWebRtc';
+import { connectYandexGoloomWebRtc, GoloomConnection, waitForVideoFrame, TOO_MANY_PEERS_RETRY_MS } from '../../services/yandexGoloomWebRtc';
 
-/** Returns false if the room JWT is expired or will expire soon (fast-path unsafe). */
-const isRoomCredentialFresh = (room: YandexWebRtcRoom): boolean => {
-  try {
-    const b64 = room.credentials.split('.')[1]?.replace(/-/g, '+').replace(/_/g, '/');
-    if (!b64) return true;
-    const payload = JSON.parse(atob(b64)) as Record<string, unknown>;
-    if (typeof payload.exp !== 'number') return true;
-    return payload.exp * 1000 > Date.now() + JWT_FAST_REUSE_MIN_TTL_MS;
-  } catch {
-    return true;
-  }
-};
 import { getQuasarCameraDevice } from '../../services/yandexIoT';
 import {
   hasCameraPrivacyControl,
@@ -22,6 +10,7 @@ import {
   mergeCameraDeviceState,
   getCameraPrivacyInstance,
 } from '../../constants';
+import { attachVideoAudioBoost, VideoAudioBoost } from '../../utils/videoAudioBoost';
 import { X, RefreshCw, Loader2, Video, AlertCircle, Eye, EyeOff, Maximize2, Settings2, PictureInPicture2 } from 'lucide-react';
 
 const QUALITY_PRESETS = [
@@ -57,11 +46,12 @@ export const CameraStreamModal: React.FC<CameraStreamModalProps> = ({
   const credentialRefreshInFlightRef = useRef(false);
   const activeConnectionIdRef = useRef<string | null>(null);
   const scheduleReconnectRef = useRef<() => void>(() => {});
-  const performSeamlessCredentialRefreshRef = useRef<(cleanupOld: () => void, connectionId: string) => Promise<void>>(async () => {});
+  const performSeamlessCredentialRefreshRef = useRef<(cleanupOld: () => void, connectionId: string) => boolean>(() => false);
   const refreshInFlightRef = useRef<Promise<YandexDevice> | null>(null);
   /** Incremented on close/unmount — async work must match to continue. */
   const sessionRef = useRef(0);
   const pendingTimersRef = useRef<Set<ReturnType<typeof setTimeout>>>(new Set());
+  const audioBoostRef = useRef<VideoAudioBoost | null>(null);
   const qualityMenuRef = useRef<HTMLDivElement>(null);
   const freezeCanvasRef = useRef<HTMLCanvasElement>(null);
   const selectedQualityRef = useRef<QualityPreset>(QUALITY_PRESETS[0]);
@@ -131,12 +121,14 @@ export const CameraStreamModal: React.FC<CameraStreamModalProps> = ({
     activeConnectionIdRef.current = null;
     lastWebrtcRoomRef.current = null;
     loadStreamRef.current = null;
-    performSeamlessCredentialRefreshRef.current = async () => {};
+    performSeamlessCredentialRefreshRef.current = () => false;
     scheduleReconnectRef.current = () => {};
   }, [clearPendingTimers]);
 
   const cleanupPlayer = useCallback(() => {
     abortStreamSession();
+    audioBoostRef.current?.release();
+    audioBoostRef.current = null;
     if (hlsRef.current) {
       hlsRef.current.destroy();
       hlsRef.current = null;
@@ -208,65 +200,120 @@ export const CameraStreamModal: React.FC<CameraStreamModalProps> = ({
     }
   }, [device, isSessionAlive]);
 
-  const performSeamlessCredentialRefresh = useCallback(async (cleanupOld: () => void, connectionId: string) => {
+  const performSeamlessCredentialRefresh = useCallback((cleanupOld: () => void, connectionId: string): boolean => {
     const session = sessionRef.current;
     if (!isSessionAlive(session)) {
       cleanupOld();
-      return;
+      return false;
     }
     if (activeConnectionIdRef.current !== connectionId) {
       cleanupOld();
-      return;
+      return false;
     }
     if (credentialRefreshInFlightRef.current) {
-      return;
+      cleanupOld();
+      return false;
     }
 
     credentialRefreshInFlightRef.current = true;
-    let stagingConn: GoloomConnection | null = null;
-    let retryScheduled = false;
-
-    const isTooManyPeers = (err: unknown) =>
-      err instanceof Error && /слишком много|too.?many/i.test(err.message);
-
-    const failRefresh = (err: unknown, cleanupOldConn: boolean) => {
-      if (!isSessionAlive(session)) return;
-      const message = err instanceof Error ? err.message : 'Не удалось обновить видеопоток';
-      if (cleanupOldConn) {
-        cleanupOld();
-        activeConnectionIdRef.current = null;
-      }
+    let refreshWatchdog: ReturnType<typeof setTimeout> | null = scheduleSessionTimer(session, () => {
+      if (!credentialRefreshInFlightRef.current) return;
+      credentialRefreshInFlightRef.current = false;
       lastWebrtcRoomRef.current = null;
-      reportStreamError(message);
+      loadStreamRef.current?.(true);
+    }, 45000);
+
+    const clearRefreshWatchdog = () => {
+      if (refreshWatchdog !== null) {
+        clearTimeout(refreshWatchdog);
+        pendingTimersRef.current.delete(refreshWatchdog);
+        refreshWatchdog = null;
+      }
     };
 
-    try {
-      const mainVideo = videoRef.current;
-      const stagingVideo = stagingVideoRef.current;
-      if (!mainVideo || !stagingVideo) {
-        cleanupOld();
-        return;
-      }
+    const scheduleReconnectAfterRefreshFailure = () => {
+      if (!isSessionAlive(session)) return;
+      lastWebrtcRoomRef.current = null;
+      scheduleSessionTimer(session, () => loadStreamRef.current?.(true), 3000);
+    };
 
-      const stream = await onGetStream(device.id);
-      if (!isSessionAlive(session)) {
-        return;
-      }
-      if (stream.protocol !== 'webrtc' || !stream.webrtc) {
-        throw new Error('WebRTC room not available');
-      }
+    void (async () => {
+      let stagingConn: GoloomConnection | null = null;
+      let retryScheduled = false;
+
+      const isTooManyPeers = (err: unknown) =>
+        err instanceof Error && /слишком много|too.?many/i.test(err.message);
 
       try {
-        stagingConn = await connectYandexGoloomWebRtc(
-          stream.webrtc,
-          stagingVideo,
-          undefined,
-          selectedQualityRef.current,
-          undefined,
-        );
+        const mainVideo = videoRef.current;
+        const stagingVideo = stagingVideoRef.current;
+        if (!mainVideo || !stagingVideo) {
+          cleanupOld();
+          scheduleReconnectAfterRefreshFailure();
+          return;
+        }
+
+        const stream = await onGetStream(device.id);
+        if (!isSessionAlive(session)) {
+          return;
+        }
+        if (stream.protocol !== 'webrtc' || !stream.webrtc) {
+          throw new Error('WebRTC room not available');
+        }
+
+        try {
+          stagingConn = await connectYandexGoloomWebRtc(
+            stream.webrtc,
+            stagingVideo,
+            undefined,
+            selectedQualityRef.current,
+            undefined,
+          );
+        } catch (err) {
+          if (isTooManyPeers(err)) {
+            stagingConn?.cleanup();
+            retryScheduled = true;
+            scheduleSessionTimer(session, () => {
+              credentialRefreshInFlightRef.current = false;
+              void performSeamlessCredentialRefreshRef.current(cleanupOld, connectionId);
+            }, TOO_MANY_PEERS_RETRY_MS);
+            return;
+          }
+          throw err;
+        }
+
+        if (!isSessionAlive(session)) {
+          stagingConn.cleanup();
+          return;
+        }
+
+        await waitForVideoFrame(stagingVideo);
+        if (!isSessionAlive(session)) {
+          stagingConn.cleanup();
+          return;
+        }
+
+        const newStream = stagingVideo.srcObject;
+        if (!newStream) {
+          throw new Error('Staging stream missing after connect');
+        }
+
+        mainVideo.srcObject = newStream;
+        mainVideo.muted = false;
+        try { await mainVideo.play(); } catch { /* ignore */ }
+        stagingVideo.srcObject = null;
+        setShowFreezeFrame(false);
+        setError(null);
+
+        cleanupOld();
+        webrtcConnectionRef.current = stagingConn;
+        activeConnectionIdRef.current = stagingConn.id;
+        stagingConn = null;
+        lastWebrtcRoomRef.current = stream.webrtc;
       } catch (err) {
+        stagingConn?.cleanup();
+        if (!isSessionAlive(session)) return;
         if (isTooManyPeers(err)) {
-          stagingConn?.cleanup();
           retryScheduled = true;
           scheduleSessionTimer(session, () => {
             credentialRefreshInFlightRef.current = false;
@@ -274,55 +321,19 @@ export const CameraStreamModal: React.FC<CameraStreamModalProps> = ({
           }, TOO_MANY_PEERS_RETRY_MS);
           return;
         }
-        throw err;
-      }
-
-      if (!isSessionAlive(session)) {
-        stagingConn.cleanup();
-        return;
-      }
-
-      await waitForVideoFrame(stagingVideo);
-      if (!isSessionAlive(session)) {
-        stagingConn.cleanup();
-        return;
-      }
-
-      const newStream = stagingVideo.srcObject;
-      if (!newStream) {
-        throw new Error('Staging stream missing after connect');
-      }
-
-      mainVideo.srcObject = newStream;
-      mainVideo.muted = false;
-      try { await mainVideo.play(); } catch { /* ignore */ }
-      stagingVideo.srcObject = null;
-      setShowFreezeFrame(false);
-      setError(null);
-
-      cleanupOld();
-      webrtcConnectionRef.current = stagingConn;
-      activeConnectionIdRef.current = stagingConn.id;
-      stagingConn = null;
-      lastWebrtcRoomRef.current = stream.webrtc;
-    } catch (err) {
-      stagingConn?.cleanup();
-      if (!isSessionAlive(session)) return;
-      if (isTooManyPeers(err)) {
-        retryScheduled = true;
-        scheduleSessionTimer(session, () => {
+        cleanupOld();
+        activeConnectionIdRef.current = null;
+        scheduleReconnectAfterRefreshFailure();
+      } finally {
+        clearRefreshWatchdog();
+        if (!retryScheduled) {
           credentialRefreshInFlightRef.current = false;
-          void performSeamlessCredentialRefreshRef.current(cleanupOld, connectionId);
-        }, TOO_MANY_PEERS_RETRY_MS);
-        return;
+        }
       }
-      failRefresh(err, false);
-    } finally {
-      if (!retryScheduled) {
-        credentialRefreshInFlightRef.current = false;
-      }
-    }
-  }, [device.id, onGetStream, reportStreamError, isSessionAlive, scheduleSessionTimer]);
+    })();
+
+    return true;
+  }, [device.id, onGetStream, isSessionAlive, scheduleSessionTimer]);
 
   useEffect(() => {
     performSeamlessCredentialRefreshRef.current = performSeamlessCredentialRefresh;
@@ -367,46 +378,10 @@ export const CameraStreamModal: React.FC<CameraStreamModalProps> = ({
 
         const scheduleReconnect = () => {
           if (!isSessionAlive(session)) return;
-          reconnectTimerRef.current = scheduleSessionTimer(session, async () => {
+          reconnectTimerRef.current = scheduleSessionTimer(session, () => {
             reconnectTimerRef.current = null;
             if (!isSessionAlive(session)) return;
-            const v = videoRef.current;
-            if (!v) return;
-            const cached = lastWebrtcRoomRef.current;
-            if (cached && isRoomCredentialFresh(cached)) {
-              if (webrtcConnectionRef.current) { webrtcConnectionRef.current.cleanupSoft(); webrtcConnectionRef.current = null; }
-              try {
-                const conn = await connectYandexGoloomWebRtc(
-                  cached, v, () => scheduleReconnect(), selectedQualityRef.current,
-                  (oldCleanup, connId) => {
-                    if (!isSessionAlive(session)) return;
-                    void performSeamlessCredentialRefreshRef.current(oldCleanup, connId);
-                  },
-                );
-                if (!isSessionAlive(session)) {
-                  conn.cleanup();
-                  return;
-                }
-                webrtcConnectionRef.current = conn;
-                activeConnectionIdRef.current = conn.id;
-                return;
-              } catch (err) {
-                if (!isSessionAlive(session)) return;
-                lastWebrtcRoomRef.current = null;
-                const isBusy = err instanceof Error && /слишком много|too.?many/i.test(err.message);
-                if (isBusy) {
-                  await new Promise<void>((resolve) => {
-                    scheduleSessionTimer(session, resolve, 3000);
-                  });
-                  if (!isSessionAlive(session)) return;
-                  loadStreamRef.current?.(true);
-                  return;
-                }
-                reportStreamError(err instanceof Error ? err.message : 'Не удалось переподключиться к камере');
-                return;
-              }
-            }
-            if (!isSessionAlive(session)) return;
+            lastWebrtcRoomRef.current = null;
             loadStreamRef.current?.(true);
           }, 3000);
         };
@@ -418,8 +393,8 @@ export const CameraStreamModal: React.FC<CameraStreamModalProps> = ({
           () => scheduleReconnect(),
           selectedQualityRef.current,
           (oldCleanup, connId) => {
-            if (!isSessionAlive(session)) return;
-            void performSeamlessCredentialRefreshRef.current(oldCleanup, connId);
+            if (!isSessionAlive(session)) return false;
+            return performSeamlessCredentialRefreshRef.current(oldCleanup, connId);
           },
         );
         if (!isSessionAlive(session)) {
@@ -536,6 +511,22 @@ export const CameraStreamModal: React.FC<CameraStreamModalProps> = ({
     // Silent reconnect with the new quality (no black flash, no loading spinner)
     loadStreamRef.current?.(true);
   }, []);
+
+  // Boost camera audio above the HTMLMediaElement 1.0 volume cap (WebRTC / HLS).
+  useEffect(() => {
+    if (!isOpen || !streamProtocol) return;
+    const video = videoRef.current;
+    if (!video) return;
+
+    video.muted = false;
+    video.volume = 1;
+    audioBoostRef.current = attachVideoAudioBoost(video);
+
+    return () => {
+      audioBoostRef.current?.release();
+      audioBoostRef.current = null;
+    };
+  }, [isOpen, streamProtocol]);
 
   // Hide freeze-frame overlay once the live stream resumes
   useEffect(() => {
@@ -767,7 +758,6 @@ export const CameraStreamModal: React.FC<CameraStreamModalProps> = ({
             className="block h-full w-full object-contain"
             controls
             playsInline
-            muted
             autoPlay
           />
           <canvas

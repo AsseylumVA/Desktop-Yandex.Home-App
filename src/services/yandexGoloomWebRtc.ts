@@ -260,7 +260,7 @@ export const connectYandexGoloomWebRtc = async (
     video: HTMLVideoElement,
     onDisconnect?: () => void,
     initialQuality: { width: number; height: number } = { width: 2560, height: 1440 },
-    onCredentialRefresh?: (cleanupOld: () => void, connectionId: string) => void | Promise<void>,
+    onCredentialRefresh?: (cleanupOld: () => void, connectionId: string) => boolean | Promise<boolean>,
 ): Promise<GoloomConnection> => {
     const connectionId = crypto.randomUUID();
     const pendingCandidates: RTCIceCandidateInit[] = [];
@@ -579,17 +579,23 @@ export const connectYandexGoloomWebRtc = async (
             const triggerCredentialRefresh = () => {
                 if (closed) return;
                 log('JWT expiring soon — triggering seamless credential refresh');
-                intentionalClose = true;
                 const cleanupOld = () => doCleanup(ws, pc, false, true);
                 if (onCredentialRefresh) {
-                    void Promise.resolve(onCredentialRefresh(cleanupOld, connectionId)).catch((err) => {
-                        logErr('credential refresh failed:', err);
-                        if (!closed) {
-                            cleanupOld();
-                            onDisconnect?.();
-                        }
-                    });
+                    void Promise.resolve(onCredentialRefresh(cleanupOld, connectionId))
+                        .then((accepted) => {
+                            if (closed) return;
+                            if (accepted === false) return;
+                            intentionalClose = true;
+                        })
+                        .catch((err) => {
+                            logErr('credential refresh failed:', err);
+                            if (!closed) {
+                                cleanupOld();
+                                onDisconnect?.();
+                            }
+                        });
                 } else {
+                    intentionalClose = true;
                     cleanupOld();
                     onDisconnect?.();
                 }
