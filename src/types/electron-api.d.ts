@@ -36,6 +36,13 @@ export interface IYandexApi {
     removeTrayCommandListener: () => void;
     
     onRetryAttempt: (callback: (data: {action: string, attempt: number, maxAttempts: number, message: string}) => void) => () => void;
+
+    showCameraStreamErrorNotification: (payload: {
+        deviceId: string;
+        deviceName: string;
+        message: string;
+    }) => Promise<boolean>;
+    onCameraStreamRetry: (callback: (data: { deviceId: string }) => void) => () => void;
 }
 
 declare global {

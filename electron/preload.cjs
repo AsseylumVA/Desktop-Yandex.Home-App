@@ -52,5 +52,13 @@ contextBridge.exposeInMainWorld('api', {
         ipcRenderer.on('yandex-api:retry-attempt', handler);
         // Возвращаем функцию для отписки
         return () => ipcRenderer.removeListener('yandex-api:retry-attempt', handler);
-    }
+    },
+
+    showCameraStreamErrorNotification: (payload) =>
+        ipcRenderer.invoke('notification:camera-stream-error', payload),
+    onCameraStreamRetry: (callback) => {
+        const handler = (_event, data) => callback(data);
+        ipcRenderer.on('camera-stream:retry', handler);
+        return () => ipcRenderer.removeListener('camera-stream:retry', handler);
+    },
 });

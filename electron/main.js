@@ -1,6 +1,6 @@
 // main.js
 
-import { app, BrowserWindow, ipcMain, Menu, Tray } from 'electron'; // <-- Добавлен Menu, Tray
+import { app, BrowserWindow, ipcMain, Menu, Tray, Notification } from 'electron'; // <-- Добавлен Menu, Tray
 import path from 'path';
 import { fileURLToPath } from 'url';
 // Импорт yandex-api.js
@@ -274,6 +274,10 @@ if (!gotTheLock) {
 
     // Когда Electron готов
     app.whenReady().then(() => {
+        if (process.platform === 'win32') {
+            app.setAppUserModelId('com.onegamerstory.smarthomecontrol');
+        }
+
         Menu.setApplicationMenu(null);
 
         createWindow();
@@ -476,6 +480,37 @@ if (!gotTheLock) {
                 openAsHidden: false, // Можно изменить на true, если нужно запускать скрыто
             });
             return enabled;
+        });
+
+        ipcMain.handle('notification:camera-stream-error', async (_event, { deviceId, deviceName, message }) => {
+            if (!Notification.isSupported()) {
+                return false;
+            }
+
+            const notification = new Notification({
+                title: `${deviceName} — нет видео`,
+                body: message,
+                actions: [{ type: 'button', text: 'Повторить' }],
+                closeButtonText: 'Закрыть',
+            });
+
+            notification.on('action', () => {
+                if (mainWindow && !mainWindow.isDestroyed()) {
+                    mainWindow.show();
+                    mainWindow.focus();
+                    mainWindow.webContents.send('camera-stream:retry', { deviceId });
+                }
+            });
+
+            notification.on('click', () => {
+                if (mainWindow && !mainWindow.isDestroyed()) {
+                    mainWindow.show();
+                    mainWindow.focus();
+                }
+            });
+
+            notification.show();
+            return true;
         });
         
         // --- 2. НОВЫЙ IPC-ОБРАБОТЧИК ДЛЯ ПОЛУЧЕНИЯ ИЗБРАННЫХ ЭЛЕМЕНТОВ ---

@@ -19,6 +19,25 @@ const QUALITY_PRESETS = [
 ] as const;
 type QualityPreset = typeof QUALITY_PRESETS[number];
 
+const MAX_STREAM_RETRIES = 10;
+const STREAM_RETRY_DELAY_MS = 3000;
+
+const normalizeStreamErrorMessage = (err: unknown): string => {
+  const raw = err instanceof Error ? err.message : 'Не удалось получить видеопоток';
+  const marker = 'Error: ';
+  const idx = raw.lastIndexOf(marker);
+  return idx >= 0 ? raw.slice(idx + marker.length) : raw;
+};
+
+const isNonRetryableStreamError = (message: string): boolean =>
+  message.includes('приват')
+  || message.includes('не умеет')
+  || message.includes('X_TOKEN')
+  || message.includes('Quasar auth')
+  || message.includes('Требуется вход')
+  || message.includes('QR')
+  || message.includes('Камера не найдена');
+
 interface CameraStreamModalProps {
   device: YandexDevice;
   isOpen: boolean;
@@ -51,6 +70,7 @@ export const CameraStreamModal: React.FC<CameraStreamModalProps> = ({
   /** Incremented on close/unmount — async work must match to continue. */
   const sessionRef = useRef(0);
   const pendingTimersRef = useRef<Set<ReturnType<typeof setTimeout>>>(new Set());
+  const streamRetryCountRef = useRef(0);
   const audioBoostRef = useRef<VideoAudioBoost | null>(null);
   const qualityMenuRef = useRef<HTMLDivElement>(null);
   const freezeCanvasRef = useRef<HTMLCanvasElement>(null);
@@ -63,6 +83,7 @@ export const CameraStreamModal: React.FC<CameraStreamModalProps> = ({
   const [error, setError] = useState<string | null>(null);
   const [streamProtocol, setStreamProtocol] = useState<string | null>(null);
   const [privacyNotice, setPrivacyNotice] = useState<string | null>(null);
+  const [reconnectNotice, setReconnectNotice] = useState<string | null>(null);
   const [selectedQuality, setSelectedQuality] = useState<QualityPreset>(QUALITY_PRESETS[0]);
   const [showQualityMenu, setShowQualityMenu] = useState(false);
   const [isPictureInPicture, setIsPictureInPicture] = useState(false);
@@ -79,6 +100,23 @@ export const CameraStreamModal: React.FC<CameraStreamModalProps> = ({
     if (!ctx) return;
     ctx.drawImage(video, 0, 0);
     setShowFreezeFrame(true);
+  }, []);
+
+  const exitPiPIfActive = useCallback(() => {
+    const video = videoRef.current;
+    if (!video || document.pictureInPictureElement !== video) return;
+    void document.exitPictureInPicture();
+    setIsPictureInPicture(false);
+  }, []);
+
+  /** Black screen in PiP during silent reconnect — do not close the PiP window. */
+  const blankPiPIfVideo = useCallback(() => {
+    const video = videoRef.current;
+    if (!video || document.pictureInPictureElement !== video) return;
+    video.pause();
+    video.srcObject = null;
+    video.removeAttribute('src');
+    void video.load();
   }, []);
 
   const privacyEnabled = isCameraPrivacyModeEnabled(cameraDevice);
@@ -121,6 +159,7 @@ export const CameraStreamModal: React.FC<CameraStreamModalProps> = ({
     activeConnectionIdRef.current = null;
     lastWebrtcRoomRef.current = null;
     loadStreamRef.current = null;
+    streamRetryCountRef.current = 0;
     performSeamlessCredentialRefreshRef.current = () => false;
     scheduleReconnectRef.current = () => {};
   }, [clearPendingTimers]);
@@ -152,11 +191,52 @@ export const CameraStreamModal: React.FC<CameraStreamModalProps> = ({
     }
   }, [abortStreamSession]);
 
-  const reportStreamError = useCallback((message: string) => {
+  const reportStreamError = useCallback((message: string, options?: { osNotify?: boolean }) => {
+    exitPiPIfActive();
+    const video = videoRef.current;
+    if (video) {
+      video.pause();
+      if (document.pictureInPictureElement === video) {
+        video.srcObject = null;
+      }
+    }
+    setReconnectNotice(null);
+    streamRetryCountRef.current = 0;
     setError(message);
     setShowFreezeFrame(false);
     setIsLoading(false);
-  }, []);
+
+    if (options?.osNotify && window.api?.showCameraStreamErrorNotification) {
+      void window.api.showCameraStreamErrorNotification({
+        deviceId: device.id,
+        deviceName: cameraDeviceRef.current.name,
+        message,
+      });
+    }
+  }, [device.id, exitPiPIfActive]);
+
+  const scheduleStreamRetry = useCallback((session: number, message: string) => {
+    if (!isSessionAlive(session)) return;
+
+    streamRetryCountRef.current += 1;
+    if (streamRetryCountRef.current >= MAX_STREAM_RETRIES) {
+      reportStreamError(message, { osNotify: true });
+      return;
+    }
+
+    blankPiPIfVideo();
+    setError(null);
+    setPrivacyNotice(null);
+    setReconnectNotice(
+      `Переподключение… (попытка ${streamRetryCountRef.current}/${MAX_STREAM_RETRIES})`,
+    );
+
+    reconnectTimerRef.current = scheduleSessionTimer(session, () => {
+      reconnectTimerRef.current = null;
+      if (!isSessionAlive(session)) return;
+      loadStreamRef.current?.(true);
+    }, STREAM_RETRY_DELAY_MS);
+  }, [blankPiPIfVideo, isSessionAlive, reportStreamError, scheduleSessionTimer]);
 
   const enterPrivacyWaitingState = useCallback((silent = false) => {
     if (!silent) {
@@ -352,6 +432,7 @@ export const CameraStreamModal: React.FC<CameraStreamModalProps> = ({
       setPrivacyNotice(null);
       setStreamProtocol(null);
     } else {
+      blankPiPIfVideo();
       captureFreezeFrame();
       clearPendingTimers();
       if (webrtcConnectionRef.current) { webrtcConnectionRef.current.cleanupSoft(); webrtcConnectionRef.current = null; }
@@ -365,6 +446,8 @@ export const CameraStreamModal: React.FC<CameraStreamModalProps> = ({
       const stream = await onGetStream(device.id);
       if (!isSessionAlive(session)) return;
 
+      streamRetryCountRef.current = 0;
+      setReconnectNotice(null);
       setStreamProtocol(stream.protocol);
       setError(null);
 
@@ -423,9 +506,8 @@ export const CameraStreamModal: React.FC<CameraStreamModalProps> = ({
           video.play().catch(() => {});
         });
         hls.on(Hls.Events.ERROR, (_event, data) => {
-          if (data.fatal) {
-            setError('Не удалось воспроизвести HLS-поток');
-          }
+          if (!data.fatal || !isSessionAlive(session)) return;
+          scheduleStreamRetry(session, 'Не удалось воспроизвести HLS-поток');
         });
       } else if (video.canPlayType('application/vnd.apple.mpegurl')) {
         video.src = streamUrl;
@@ -438,17 +520,26 @@ export const CameraStreamModal: React.FC<CameraStreamModalProps> = ({
       }
     } catch (err) {
       if (!isSessionAlive(session)) return;
-      const message = err instanceof Error ? err.message : 'Не удалось получить видеопоток';
+      const message = normalizeStreamErrorMessage(err);
       if (privacyEnabled || message.includes('приват') || message.includes('не умеет')) {
         setPrivacyNotice('Камера может быть в режиме приватности. Отключите его кнопкой ниже.');
+        reportStreamError(message);
+        return;
       }
-      reportStreamError(message);
+      if (isNonRetryableStreamError(message)) {
+        reportStreamError(message);
+        return;
+      }
+      if (streamProtocol || silent) {
+        captureFreezeFrame();
+      }
+      scheduleStreamRetry(session, message);
     } finally {
       if (isSessionAlive(session)) {
         setIsLoading(false);
       }
     }
-  }, [cleanupPlayer, clearPendingTimers, device.id, onGetStream, privacyEnabled, captureFreezeFrame, enterPrivacyWaitingState, reportStreamError, isSessionAlive, scheduleSessionTimer]);
+  }, [cleanupPlayer, clearPendingTimers, device.id, onGetStream, privacyEnabled, captureFreezeFrame, enterPrivacyWaitingState, reportStreamError, isSessionAlive, scheduleSessionTimer, scheduleStreamRetry, blankPiPIfVideo, streamProtocol]);
 
   const handleTogglePrivacy = useCallback(async () => {
     setIsTogglingPrivacy(true);
@@ -578,6 +669,21 @@ export const CameraStreamModal: React.FC<CameraStreamModalProps> = ({
     loadStreamRef.current = loadStream;
   });
 
+  // OS notification "Повторить" → reconnect this camera
+  useEffect(() => {
+    if (!isOpen || !window.api?.onCameraStreamRetry) return;
+
+    const unsubscribe = window.api.onCameraStreamRetry(({ deviceId }) => {
+      if (deviceId !== device.id) return;
+      streamRetryCountRef.current = 0;
+      setError(null);
+      setReconnectNotice(null);
+      loadStreamRef.current?.();
+    });
+
+    return unsubscribe;
+  }, [isOpen, device.id]);
+
   // While streaming: poll every 20 s to catch physical privacy-button presses.
   // While privacy is ON (no stream): poll every 5 s waiting for it to be lifted,
   // then auto-reconnect so the user doesn't have to press "Повторить" manually.
@@ -621,6 +727,7 @@ export const CameraStreamModal: React.FC<CameraStreamModalProps> = ({
       cleanupPlayer();
       setError(null);
       setPrivacyNotice(null);
+      setReconnectNotice(null);
       setStreamProtocol(null);
       return;
     }
@@ -803,7 +910,14 @@ export const CameraStreamModal: React.FC<CameraStreamModalProps> = ({
             </div>
           )}
 
-          {privacyNotice && !error && !isLoading && (
+          {reconnectNotice && !error && (
+            <div className="absolute bottom-3 left-3 right-3 flex items-center justify-center gap-2 px-3 py-2 rounded-lg bg-slate-900/90 text-white text-xs text-center">
+              <Loader2 className="w-4 h-4 shrink-0 animate-spin" />
+              <span>{reconnectNotice}</span>
+            </div>
+          )}
+
+          {privacyNotice && !error && !isLoading && !reconnectNotice && (
             <div className="absolute bottom-3 left-3 right-3 px-3 py-2 rounded-lg bg-amber-500/90 text-white text-xs text-center">
               {privacyNotice}
             </div>
