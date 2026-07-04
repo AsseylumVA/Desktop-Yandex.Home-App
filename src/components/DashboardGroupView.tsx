@@ -28,9 +28,7 @@ export const DashboardGroupView: React.FC<DashboardGroupViewProps> = ({
 
     return (
         <div className="device-grid">
-            {groupDevices
-                .filter(d => !state.getEffectiveHidden(`device_${d.id}`))
-                .map(dev => (
+            {groupDevices.map(dev => (
                     <DeviceCard
                         key={dev.id}
                         device={dev}
@@ -39,9 +37,6 @@ export const DashboardGroupView: React.FC<DashboardGroupViewProps> = ({
                         onToggleFavorite={ctx.onToggleDeviceFavorite}
                         onOpenSettings={state.handleOpenDeviceSettings}
                         onOpenCameraStream={state.openCameraStream}
-                        isEditMode={state.edit.isEditMode}
-                        iconHiddenState={state.getIconHiddenState(`device_${dev.id}`)}
-                        onToggleVisibility={() => state.toggleCardVisibility(`device_${dev.id}`)}
                         sensorDisplayConfig={state.sensorDisplayConfig}
                     />
                 ))}

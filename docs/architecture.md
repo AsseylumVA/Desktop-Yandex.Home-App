@@ -1,7 +1,7 @@
 # Архитектура Yandex Smart Home Control
 
-> **Версия документа:** 1.0  
-> **Дата:** 29 июня 2026 г.  
+> **Версия документа:** 1.1  
+> **Дата:** 4 июля 2026 г.  
 > **Версия приложения:** 1.8.1-beta  
 > **Назначение:** Описание общей архитектуры, стека технологий, потоков данных и контрактов между модулями проекта Yandex Smart Home Control
 > **Аудитория:** Разработчики, архитекторы
@@ -19,6 +19,15 @@
 - [7. Роль каждого модуля](#7-роль-каждого-модуля)
 - [8. Контракты между модулями](#8-контракты-между-модулями)
 - [9. Ключевые архитектурные проблемы](#9-ключевые-архитектурные-проблемы)
+- [10. Изоляция режима редактирования (Hide/Show)](#10-изоляция-режима-редактирования-hideshow)
+  - [10.1. Проблема](#101-проблема)
+  - [10.2. Решение](#102-решение)
+  - [10.3. Архитектура изоляции](#103-архитектура-изоляции)
+  - [10.4. Поток данных (схема передачи пропсов)](#104-поток-данных-схема-передачи-пропсов)
+  - [10.5. Состояние и localStorage](#105-состояние-и-localstorage)
+  - [10.6. Изменённые файлы](#106-изменённые-файлы)
+  - [10.7. Edge Cases](#107-edge-cases)
+  - [10.8. Ключевые принципы](#108-ключевые-принципы)
 - [Связанные документы](#связанные-документы)
 
 ---
@@ -361,7 +370,190 @@ Rendere-процесс взаимодействует с main-процессом
 5. **Отсутствие выделенных хуков** — вся логика в теле компонентов, хуки не вынесены
 6. **Перерендеры** — NotificationToast пересоздаётся при каждом рендере App
 
+## 10. Изоляция режима редактирования (Hide/Show)
+
+> **Версия:** 1.0  
+> **Дата:** 4 июля 2026 г.  
+> **Статус:** Реализовано
+
+### 10.1. Проблема
+
+Функциональность «редактирование отображения» (скрытие/показ карточек устройств, сценариев и групп) была внедрена глобально — она применялась ко всем страницам приложения (главный дашборд, страницы комнат и групп). Это приводило к путанице: пользователь, скрыв карточку на главном дашборде, «терял» её и на странице комнаты, где ожидал видеть все устройства.
+
+### 10.2. Решение
+
+Режим редактирования и фильтрация скрытых карточек **изолированы** — они работают **только на главном дашборде** (`DashboardHomeView`). Страницы комнат и групп (`DashboardRoomView`, `DashboardGroupView`) показывают **все устройства** без фильтрации, как если бы функция скрытия не существовала.
+
+### 10.3. Архитектура изоляции
+
+Изоляция реализована на **трёх уровнях**:
+
+```
+┌─────────────────────────────────────────────────────────────────────────┐
+│                     DASHBOARD (Dashboard.tsx)                           │
+│                                                                         │
+│  activeSidebarView:                                                     │
+│  ┌─────────────────────────────────────────────────────────────────┐   │
+│  │ 'home'  → Показывает кнопку Pencil → DashboardHomeView         │   │
+│  │           (edit mode ДОСТУПЕН: фильтрация, видимость, toggles)  │   │
+│  ├─────────────────────────────────────────────────────────────────┤   │
+│  │ 'room'  → Не показывает Pencil  → DashboardRoomView            │   │
+│  │           (edit mode НЕ ДОСТУПЕН: все устройства без фильтра)   │   │
+│  ├─────────────────────────────────────────────────────────────────┤   │
+│  │ 'group' → Не показывает Pencil  → DashboardGroupView           │   │
+│  │           (edit mode НЕ ДОСТУПЕН: все устройства без фильтра)   │   │
+│  └─────────────────────────────────────────────────────────────────┘   │
+└─────────────────────────────────────────────────────────────────────────┘
+```
+
+#### Уровень 1: Кнопка входа в режим (Dashboard.tsx)
+
+Кнопка «Pencil» (карандаш) показывается **только** когда `activeSidebarView === 'home'`:
+
+```tsx
+// Dashboard.tsx, строка 279
+{ctx.activeSidebarView === 'home' && (
+    <button onClick={state.toggleEditMode} ...>
+        <Pencil className="w-4 h-4" />
+    </button>
+)}
+```
+
+При переключении на комнату или группу кнопка исчезает — войти в режим редактирования невозможно.
+
+#### Уровень 2: Сброс режима при смене вида (useDashboardState.ts)
+
+Хук `useDashboardState` сбрасывает `isEditMode` при уходе с главного дашборда:
+
+```tsx
+// useDashboardState.ts, строка 262-266
+useEffect(() => {
+    if (activeSidebarView !== 'home') {
+        setIsEditMode(false);
+    }
+}, [activeSidebarView]);
+```
+
+Это гарантирует, что если пользователь активировал edit mode на главном дашборде, а затем переключился на комнату, режим автоматически выключится. При возврате на главный дашборд режим не активен — нужно нажать Pencil снова.
+
+#### Уровень 3: Отсутствие пропсов в Room/Group View
+
+View-компоненты для комнат и групп **не передают** карточкам пропсы, связанные с редактированием:
+
+| Пропс                     | DashboardHomeView | DashboardRoomView | DashboardGroupView |
+|---------------------------|:-----------------:|:-----------------:|:------------------:|
+| `isEditMode`              | ✅                | ❌                | ❌                 |
+| `iconHiddenState`         | ✅                | ❌                | ❌                 |
+| `onToggleVisibility`      | ✅                | ❌                | ❌                 |
+| `getEffectiveHidden`      | ✅                | ❌                | ❌                 |
+| `getIconHiddenState`      | ✅                | ❌                | ❌                 |
+| `onToggleDeviceVisibility`| ✅                | ❌                | ❌                 |
+
+Также в `DashboardRoomView` и `DashboardGroupView` **отсутствует фильтрация** устройств через `.filter(d => !state.getEffectiveHidden(...))`.
+
+### 10.4. Поток данных (схема передачи пропсов)
+
+#### Главный дашборд ('home') — edit mode ПОЛНОСТЬЮ функционален
+
+```
+Dashboard.tsx
+  │
+  │  state.toggleEditMode          (кнопка Pencil видна)
+  │  state.edit.isEditMode
+  │  state.getEffectiveHidden()
+  │  state.getIconHiddenState()
+  │  state.toggleCardVisibility()
+  │
+  ▼
+DashboardHomeView.tsx
+  │
+  ├── ScenarioCard
+  │     isEditMode={state.edit.isEditMode}
+  │     iconHiddenState={state.getIconHiddenState(cardId)}
+  │     onToggleVisibility={() => state.toggleCardVisibility(cardId)}
+  │
+  ├── DeviceCardAdapter
+  │     isEditMode={state.edit.isEditMode}
+  │     iconHiddenState={state.getIconHiddenState(`device_${dev.id}`)}
+  │     onToggleVisibility={() => state.toggleCardVisibility(`device_${dev.id}`)}
+  │
+  └── GroupCard
+        isEditMode={state.edit.isEditMode}
+        getEffectiveHidden={state.getEffectiveHidden}
+        getIconHiddenState={state.getIconHiddenState}
+        onToggleDeviceVisibility={state.toggleCardVisibility}
+```
+
+#### Комната ('room') — edit mode ОТСУТСТВУЕТ
+
+```
+Dashboard.tsx
+  │
+  │  (кнопка Pencil скрыта)
+  │
+  ▼
+DashboardRoomView.tsx
+  │
+  ├── DeviceCardAdapter        (без пропсов edit mode)
+  └── GroupCard                (без пропсов edit mode)
+```
+
+#### Группа ('group') — edit mode ОТСУТСТВУЕТ
+
+```
+Dashboard.tsx
+  │
+  │  (кнопка Pencil скрыта)
+  │
+  ▼
+DashboardGroupView.tsx
+  │
+  └── DeviceCard               (без пропсов edit mode)
+```
+
+### 10.5. Состояние и localStorage
+
+Несмотря на изоляцию, **все состояния** режима редактирования сохраняются в `useDashboardState` и `localStorage` в неизменном виде:
+
+| Состояние               | Тип              | Хранение                     |
+|-------------------------|------------------|------------------------------|
+| `isEditMode`            | `boolean`        | React state (сбрасывается при смене вида) |
+| `hiddenCardIds`         | `Set<string>`    | React state + localStorage  |
+| `visibilityChanges`     | `Map<string, boolean>` | React state (только во время сессии) |
+
+- `hiddenCardIds` пишется в `localStorage` при выходе из режима редактирования (`toggleEditMode`)
+- `hiddenCardIds` также загружается из `localStorage` при смене household
+- Данные в `localStorage` не удаляются — они неактивны на страницах комнат/групп, но применяются при возврате на главный дашборд
+
+### 10.6. Изменённые файлы
+
+| Файл                              | Изменение                                                                 |
+|-----------------------------------|---------------------------------------------------------------------------|
+| `src/components/DashboardRoomView.tsx` | Убрана фильтрация `.filter(d => !state.getEffectiveHidden(...))` для устройств. Убраны пропсы `isEditMode`, `iconHiddenState`, `onToggleVisibility` из `DeviceCardAdapter`. Убраны пропсы `isEditMode`, `getEffectiveHidden`, `getIconHiddenState`, `onToggleDeviceVisibility` из `GroupCard`. |
+| `src/components/DashboardGroupView.tsx` | Убрана фильтрация `.filter(d => !state.getEffectiveHidden(...))` для устройств. Убраны пропсы `isEditMode`, `iconHiddenState`, `onToggleVisibility` из `DeviceCard`. |
+
+### 10.7. Edge Cases
+
+| Сценарий                                           | Ожидаемое поведение                                                                              |
+|----------------------------------------------------|--------------------------------------------------------------------------------------------------|
+| Пользователь скрыл карточку на home → перешёл в комнату | Карточка **видна** в комнате. `hiddenCardIds` сохранён, но `DashboardRoomView` не применяет фильтр. |
+| Пользователь в edit mode на home → переключился на комнату | Режим редактирования **автоматически сбрасывается** (useEffect в `useDashboardState`).            |
+| Пользователь вернулся на home                       | Edit mode **не активен**. Чтобы увидеть/изменить скрытые карточки, нужно нажать Pencil.           |
+| Пользователь активировал edit mode → скрыл карточку → вышел из режима (Save) → перешёл в комнату → вернулся на home → нажал Pencil | Карточка **скрыта** — все changeset'ы закоммичены в `hiddenCardIds` и сохранены в `localStorage`. |
+| Пользователь активировал edit mode → скрыл карточку → перешёл в комнату (режим сброшен) → вернулся на home → нажал Pencil | Карточка **показана** — changeset'ы не были закоммичены (выход из режима не через `toggleEditMode`, а через сброс при смене вида). |
+| Скрытие карточки на странице комнаты                 | **Невозможно** — кнопка Pencil не показывается, карточки не содержат UI для скрытия.              |
+| Переключение household                              | `hiddenCardIds` перезагружаются из `localStorage` для нового household. Режим редактирования сбрасывается. |
+
+### 10.8. Ключевые принципы
+
+1. **View-компоненты сами решают, вызывать ли функции скрытия.** `DashboardHomeView` — вызывает, `DashboardRoomView`/`DashboardGroupView` — нет. Нет общего флага «isHiddenEnabled» в пропсах — решение зашито в каждом view.
+2. **Хук `useDashboardState` ничего не знает о том, какой view его использует.** Все функции (getEffectiveHidden, getIconHiddenState и т.д.) доступны всегда — это ответственность view-компонента решать, какие из них передавать карточкам.
+3. **Сброс edit mode при навигации — страховочный механизм.** Даже если view случайно передаст isEditMode карточке, значение будет `false`, и UI скрытия не появится.
+4. **Данные не теряются.** localStorage сохраняет скрытые карточки даже при переключении между страницами. Пользователь не потеряет настройки отображения.
+
 ## Связанные документы
 
 - [`components-analysis.md`](./components-analysis.md) — Полный анализ каждого компонента, метрики, дублирование кода, dead code
 - [`refactoring-plan.md`](./refactoring-plan.md) — Пошаговый план рефакторинга: выделение хуков, контекстов, устранение дублирования
+- [`sensor-card.md`](./sensor-card.md) — Описание компонента SensorCard
+- [`CHANGELOG.md`](./CHANGELOG.md) — История изменений проекта

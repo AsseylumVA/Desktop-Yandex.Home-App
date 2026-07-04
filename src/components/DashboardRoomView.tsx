@@ -42,10 +42,8 @@ export const DashboardRoomView: React.FC<DashboardRoomViewProps> = ({
         <>
             {standaloneDevices.length > 0 && (
                 <div className="device-grid" style={{ marginBottom: 16 }}>
-                    {standaloneDevices
-                        .filter(d => !state.getEffectiveHidden(`device_${d.id}`))
-                        .map(dev => (
-                            <DeviceCardAdapter key={dev.id} device={dev} onToggle={ctx.onToggleDevice} isFavorite={ctx.favoriteDeviceIds.includes(dev.id)} onToggleFavorite={ctx.onToggleDeviceFavorite} onOpenSettings={state.handleOpenDeviceSettings} onOpenCameraStream={state.openCameraStream} isEditMode={state.edit.isEditMode} iconHiddenState={state.getIconHiddenState(`device_${dev.id}`)} onToggleVisibility={() => state.toggleCardVisibility(`device_${dev.id}`)} sensorDisplayConfig={state.sensorDisplayConfig} />
+                    {standaloneDevices.map(dev => (
+                            <DeviceCardAdapter key={dev.id} device={dev} onToggle={ctx.onToggleDevice} isFavorite={ctx.favoriteDeviceIds.includes(dev.id)} onToggleFavorite={ctx.onToggleDeviceFavorite} onOpenSettings={state.handleOpenDeviceSettings} onOpenCameraStream={state.openCameraStream} sensorDisplayConfig={state.sensorDisplayConfig} />
                         ))}
                 </div>
             )}
@@ -69,10 +67,6 @@ export const DashboardRoomView: React.FC<DashboardRoomViewProps> = ({
                         else if (gDevices.length > 0 && gDevices.every(d => d.type === 'devices.types.thermostat.ac' || d.type === 'devices.types.thermostat')) state.openGroupThermostatSettings(g);
                         else if (gDevices.length > 0 && gDevices.every(d => d.type === 'devices.types.ventilation.fan')) state.openGroupFanSettings(g);
                     }}
-                    isEditMode={state.edit.isEditMode}
-                    getEffectiveHidden={state.getEffectiveHidden}
-                    getIconHiddenState={state.getIconHiddenState}
-                    onToggleDeviceVisibility={state.toggleCardVisibility}
                 />
             ))}
         </>
