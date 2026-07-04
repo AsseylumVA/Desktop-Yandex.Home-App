@@ -87,18 +87,57 @@
 
 При запуске приложения отобразится экран входа, где основным параметром входа будет являться токен Умного дома Яндекс.
 
-<img width="554" height="566" alt="image" src="https://github.com/user-attachments/assets/b9777898-fbf7-4b80-938b-79c240cc2f50" />
+<img width="1479" height="972" alt="image" src="https://github.com/user-attachments/assets/e68eee4d-4daa-4ef8-bf88-f2224f257ae3" />
 
+Если в умном доме есть камеры, то приложение запросит у вас дополнительное подтверждение через Яндекс для доступа к видеопотоку: 
 
+<img width="1479" height="972" alt="image" src="https://github.com/user-attachments/assets/58dd36f8-e41a-4e29-8736-a73680d60db7" />
+
+Пример видеопотока с камеры: 
+<img width="1479" height="972" alt="image" src="https://github.com/user-attachments/assets/b86fd6ad-274c-421c-baaf-5d8aa52e2d00" />
 
 После пользователь попадает в основное окно со всеми устройствами и сценариями Умного дома, которые были настроены через приложение **"Умный дом с Алисой"**
 
-<img width="1083" height="974" alt="image" src="https://github.com/user-attachments/assets/d2aa7c23-80fb-47e4-8788-65689d423576" />
-<img width="1083" height="974" alt="image" src="https://github.com/user-attachments/assets/3cfef3ac-5e90-459d-b087-a04c80c422b7" />
-<img width="727" height="750" alt="image" src="https://github.com/user-attachments/assets/c8e8943e-ae14-436f-b45f-b03bb5eea2c0" />
-<img width="678" height="590" alt="image" src="https://github.com/user-attachments/assets/4ae9bd11-d5ab-4cc0-ba37-a387d48de7d8" />
-<img width="570" height="676" alt="image" src="https://github.com/user-attachments/assets/7d125328-bf0b-4650-94fc-63905c49ab92" />
-<img width="299" height="248" alt="image" src="https://github.com/user-attachments/assets/632f125a-6137-4a10-8a4e-1cd4bd20682f" />
+<img width="1479" height="972" alt="image" src="https://github.com/user-attachments/assets/152b50ba-df2d-4489-81db-c93154cf4bbd" />
+<img width="1479" height="972" alt="image" src="https://github.com/user-attachments/assets/263c7eac-8e3d-48a1-8e94-07db4a63b9df" />
+
+### 2.1. Боковое меню
+
+На боковом меню отображена вся структура умного дома отдельными категориями (комнаты, группы, сценарии, датчики), а также имеется возможность переключиться между несколькими домами: 
+
+<img width="1479" height="972" alt="image" src="https://github.com/user-attachments/assets/405ffba8-d02d-4b4f-925d-c1d51b029e91" />
+
+### 2.2. Датчики
+
+Возможность вывода необходимой информации на датчик через меню настроек для конкретного устройства:
+
+<img width="750" height="642" alt="image" src="https://github.com/user-attachments/assets/d45ecdb4-e806-45e6-be17-fe4792f7384a" />
+<img width="612" height="641" alt="image" src="https://github.com/user-attachments/assets/78813953-a649-47e3-afef-fc8b140fb48d" />
+
+А при добавлении датчика в "Избранное" все показатели будут отображаться в трее:
+
+<img width="419" height="137" alt="image" src="https://github.com/user-attachments/assets/8fbd046a-ff86-4062-a749-18fb7f3407fe" />
+
+### 2.3. Управление светом
+
+У световых устройств и групп световых устройств есть возможность настройки яркости, температуры и цвета освещения: 
+
+<img width="575" height="589" alt="image" src="https://github.com/user-attachments/assets/c2e71de6-9529-4fa4-ac33-768051e50f22" />
+<img width="552" height="468" alt="image" src="https://github.com/user-attachments/assets/0e7f5a3e-64e8-4eba-8139-0857239b425b" />
+
+### 2.4. Управление температурой
+
+У таких устройств, как кондиционеры, вентиляторы и термостаты есть возможность настройки температуры, скорости обдува и переключение режимов в зависимости от особенностей устройства:
+
+<img width="543" height="514" alt="image" src="https://github.com/user-attachments/assets/f1b29d6a-2f3e-43b7-8c14-5658b672b192" />
+
+<img width="537" height="645" alt="image" src="https://github.com/user-attachments/assets/8328bbdd-3018-4da6-a2a2-c4ea37774fea" />
+
+### 2.5. Избранное
+
+Все устройства или сценарии, добавленные в Избранное, становятся доступными в трее. Если это устройство с переключением состояний (ВКЛ/ВЫКЛ) или сценарий, то можно управлять запуском/отключением прямо из трей:
+
+<img width="207" height="185" alt="image" src="https://github.com/user-attachments/assets/0d39f13d-a98e-438a-a825-2571c94c2559" />
 
 
 ## 3. Удаление
