@@ -2,7 +2,7 @@
 
 > **Версия документа:** 1.2  
 > **Дата:** 4 июля 2026 г.  
-> **Версия приложения:** 1.9.0-beta  
+> **Версия приложения:** 1.8.5-beta  
 > **Назначение:** Описание общей архитектуры, стека технологий, потоков данных и контрактов между модулями проекта Yandex Smart Home Control
 > **Аудитория:** Разработчики, архитекторы
 
@@ -66,22 +66,26 @@
 │  │  ┌───────────────┐  ┌────────────────────────────────────┐    │   │
 │  │  │  window.api   │  │   React Application (Vite + HMR)   │    │   │
 │  │  │  (IPC-мост)   │  │                                    │    │   │
-│  │  └───────┬───────┘  │  ┌───────────┐  ┌──────────────┐   │    │   │
-│  │          │          │  │  App.tsx   │  │ Dashboard    │   │    │   │
-│  │          │          │  │ (состояние,│  │ (рендеринг,  │   │    │   │
-│  │          │          │  │  логика)   │  │  модалки)    │   │    │   │
-│  │          ▼          │  └─────┬─────┘  └──────┬───────┘   │    │   │
-│  │  ┌───────────────┐  │        │                │           │    │   │
-│  │  │  yandexIoT.ts │  │        ├── Sidebar.tsx  │           │    │   │
-│  │  │  (сервис-слой)│  │        ├── DeviceCard   │           │    │   │
-│  │  └───────────────┘  │        ├── ScenarioCard │           │    │   │
-│  │  ┌───────────────┐  │        ├── GroupCard    │           │    │   │
-│  │  │ yandexGoloom  │  │        ├── 7 модалок    │           │    │   │
-│  │  │ WebRtc.ts     │  │        └── Contexts     │           │    │   │
-│  │  └───────────────┘  │                           │           │    │   │
-│  │  ┌───────────────┐  │                           │           │    │   │
-│  │  │  constants.tsx│  │  (свальник констант и     )           │    │   │
-│  │  └───────────────┘  │   хелперов)                          │    │   │
+│  │  └───────┬───────┘  │  ┌────────────────────────────────┐  │    │   │
+│  │          │          │  │  App.tsx                       │  │    │   │
+│  │          │          │  │  (хуки, логика, ~305 строк)     │  │    │   │
+│  │          ▼          │  └────────────┬───────────────────┘  │    │   │
+│  │  ┌───────────────┐  │               │                      │    │   │
+│  │  │  yandexIoT.ts │  │  ┌────────────▼───────────────────┐  │    │   │
+│  │  │  (сервис-слой)│  │  │  DashboardContext               │  │    │   │
+│  │  └───────────────┘  │  │  (данные, обработчики)          │  │    │   │
+│  │  ┌───────────────┐  │  └────────────┬───────────────────┘  │    │   │
+│  │  │ yandexGoloom  │  │               │                      │    │   │
+│  │  │ WebRtc.ts     │  │  ┌────────────▼───────────────────┐  │    │   │
+│  │  └───────────────┘  │  │  Dashboard                      │  │    │   │
+│  │  ┌─────────────────┐ │  │  (рендеринг, модалки)           │  │    │   │
+│  │  │  src/constants/  │ │  └──┬────────────────────────────┘  │    │   │
+│  │  │  ├── icons.tsx   │ │     │                                │    │   │
+│  │  │  ├── deviceTypes │ │     ├── Sidebar.tsx                  │    │   │
+│  │  │  ├── formatting  │ │     │   (1 пропс + контекст)         │    │   │
+│  │  │  ├── parsing.ts  │ │     ├── DeviceCard / GroupCard       │    │   │
+│  │  │  └── index.ts    │ │     ├── ScenarioCard                 │    │   │
+│  │  └─────────────────┘ │     └── 11 модалок                   │    │   │
 │  └─────────────────────┴────────────────────────────────────────┘   │
 └─────────────────────────────────────────────────────────────────────────┘
                               │
@@ -163,7 +167,7 @@
 
 ```
 <ThemeProvider>                       // contexts/ThemeContext.tsx
-  └── <App>                           // App.tsx — GOD-компонент (~893 строки)
+  └── <App>                           // App.tsx — композиция хуков (~305 строк)
         │
         ├── <TokenInput />            // Экран входа (условно)
         ├── <QrAuthModal />           // Модалка QR-авторизации (условно)
@@ -298,27 +302,33 @@
 
 | Модуль / Файл                       | Роль                                              | Строк |
 |-------------------------------------|---------------------------------------------------|-------|
-| `src/App.tsx`                       | **GOD**: корневой компонент, состояние, логика    | 893   |
+| `src/App.tsx`                       | Корневой компонент, хуки, логика                  | 305   |
 | `src/index.tsx`                     | Точка входа React                                 | ~15   |
-| `src/index.css`                     | Глобальные стили, CSS переменные                   | ~200  |
-| `src/constants.tsx`                 | **GOD**: свальник констант, хелперов, маппингов  | 413   |
+| `src/index.css`                     | Глобальные стили, CSS переменные                   | 1047  |
+| `src/constants/icons.tsx`           | Определения иконок для устройств                  | 87    |
+| `src/constants/deviceTypes.ts`      | Типы и маппинги устройств                         | 34    |
+| `src/constants/formatting.ts`       | Форматирование данных (температура, влажность)    | 258   |
+| `src/constants/parsing.ts`          | Парсинг данных устройств                          | 9     |
+| `src/constants/index.ts`            | Реэкспорт всех модулей constants                  | 5     |
 | `src/components/Dashboard.tsx`      | Панель, модалки, фильтрация (использует useDashboardContext) | 417   |
 | `src/components/Sidebar.tsx`        | Навигация: 1 пропс, 6 подкомпонентов, контекст    | 164   |
-| `src/components/sidebar/SidebarHeader.tsx` | Выбор домохозяйства (household selector)     | ~30   |
-| `src/components/sidebar/SidebarFavorites.tsx` | Избранные устройства                      | ~60   |
-| `src/components/sidebar/SidebarSensors.tsx` | Датчики                                  | ~35   |
-| `src/components/sidebar/SidebarRooms.tsx` | Комнаты                                  | ~50   |
-| `src/components/sidebar/SidebarGroups.tsx` | Группы устройств                         | ~40   |
-| `src/components/sidebar/SidebarScenarios.tsx` | Сценарии                              | ~60   |
+| `src/components/sidebar/SidebarHeader.tsx` | Выбор домохозяйства (household selector)     | ~63   |
+| `src/components/sidebar/SidebarFavorites.tsx` | Избранные устройства                      | ~203  |
+| `src/components/sidebar/SidebarSensors.tsx` | Датчики                                  | ~70   |
+| `src/components/sidebar/SidebarRooms.tsx` | Комнаты                                  | 43    |
+| `src/components/sidebar/SidebarGroups.tsx` | Группы устройств                         | 46    |
+| `src/components/sidebar/SidebarScenarios.tsx` | Сценарии                              | 57    |
 | `src/components/TokenInput.tsx`     | Форма ввода токена                                 | ~80   |
 | `src/components/cards/DeviceCard.tsx` | Карточка устройства                              | 201   |
 | `src/components/cards/ScenarioCard.tsx` | Карточка сценария                              | 77    |
 | `src/components/cards/GroupCard.tsx` | Карточка группы (7 useMemo → 2, багфикс groupIsOn) | 151   |
-| `src/components/modals/` (10 файлов)| Модальные окна (настройки, стрим, инфо, обновления)| разное |
+| `src/components/modals/` (11 файлов)| Модальные окна (настройки, стрим, инфо, обновления, SensorSettings)| разное |
 | `src/contexts/ThemeContext.tsx`      | Провайдер темы (light/dark)                       | 55    |
-| `src/services/yandexIoT.ts`         | Сервис-слой: вызовы IPC (77% — мок-функция)       | 741   |
-| `src/services/yandexGoloomWebRtc.ts`| WebRTC стриминг с камер Yandex                    | ~500  |
-| `src/types/index.ts`                | Все TypeScript интерфейсы                         | ~200  |
+| `src/contexts/DashboardContext.tsx`  | Провайдер контекста Dashboard (данные, обработчики)| ~90   |
+| `src/hooks/` (11 файлов)            | Выделенные хуки: useDashboardState, useDashboardContext, useYandexApi, useAuth, useTheme, useNotifications, useHouseholdData, useCollapsedSections, useEditMode, useVisibility, useDeviceOperations | ~суммарно 600+ |
+| `src/services/yandexIoT.ts`         | Сервис-слой: вызовы IPC (мок-функция удалена)     | 118   |
+| `src/services/yandexGoloomWebRtc.ts`| WebRTC стриминг с камер Yandex                    | 613   |
+| `src/types/index.ts`                | Все TypeScript интерфейсы                         | 142   |
 | `src/utils/colorConverter.ts`       | Конвертация HSV ↔ RGB                             | ~80   |
 
 ### Electron (electron/)
@@ -374,12 +384,16 @@ Rendere-процесс взаимодействует с main-процессом
 
 ## 9. Ключевые архитектурные проблемы
 
-1. **God-компоненты** — `App.tsx` и `Dashboard.tsx` содержат всю логику приложения
-2. **Prop drilling** — пропсы прокидываются через 3-4 уровня (App → Dashboard → GroupCard → DeviceCard)
-3. **Смешение ответственности** — `constants.tsx` содержит и константы, и JSX-хелперы, и функции проверки типов
-4. **Dead code** — `injectComprehensiveMockDevices` (573 строки, 77% файла yandexIoT.ts) не используется
-5. **Отсутствие выделенных хуков** — вся логика в теле компонентов, хуки не вынесены
-6. **Перерендеры** — NotificationToast пересоздаётся при каждом рендере App
+Статус на текущую итерацию: **✅ Все 6 проблем решены**.
+
+| № | Проблема | Статус | Комментарий |
+|:-:|----------|--------|-------------|
+| 1 | God-компонент `App.tsx` | ✅ **Решено** | Сокращён с 893 до 305 строк. Логика вынесена в 11 хуков и DashboardContext |
+| 2 | Prop drilling (App → Dashboard → Sidebar → ...) | 🔶 **Частично решено** | Sidebar переведён на DashboardContext (25 пропсов → 1). GroupCard/DeviceCard всё ещё получают пропсы от Dashboard |
+| 3 | Смешение ответственности `constants.tsx` | ✅ **Решено** | Разбит на 6 модулей: icons.tsx, deviceTypes.ts, formatting.ts, parsing.ts, index.ts |
+| 4 | Dead code (`injectComprehensiveMockDevices`) | ✅ **Решено** | Мок-функция удалена. yandexIoT.ts сокращён с 741 до 118 строк |
+| 5 | Отсутствие выделенных хуков | ✅ **Решено** | Созданы 11 хуков в src/hooks/ (useDashboardState, useDashboardContext, useYandexApi и др.) |
+| 6 | Перерендеры NotificationToast | ✅ **Решено** | Вынесен в отдельный компонент src/components/NotificationToast.tsx, обёрнут в React.memo |
 
 ## 10. Изоляция режима редактирования (Hide/Show)
 
@@ -705,6 +719,8 @@ useMemo 2: groupInfo — ОДИН проход по groupDevices:
 | `src/components/sidebar/SidebarGroups.tsx` | Новый: группы |
 | `src/components/sidebar/SidebarScenarios.tsx` | Новый: сценарии |
 | `src/components/Dashboard.tsx` | Упрощён вызов `<Sidebar onOpenCameraStream={...} />` |
+| `src/contexts/DashboardContext.tsx` | Создан контекст для устранения prop drilling, предоставляет данные и обработчики |
+| `src/hooks/useDashboardState.ts` | Хук состояния Dashboard (модалки, collapse, edit mode) |
 
 ---
 
