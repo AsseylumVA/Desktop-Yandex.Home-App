@@ -4,7 +4,7 @@ import { Dashboard } from './components/Dashboard';
 import { UpdateNotificationModal } from './components/modals/UpdateNotificationModal';
 import { QrAuthModal } from './components/modals/QrAuthModal';
 import { fetchUserInfo } from './services/yandexIoT';
-import { AppState, YandexUserInfoResponse, YandexDevice, YandexScenario, TrayMenuItem, TrayItemType, YandexHousehold } from './types/index';
+import { AppState, YandexUserInfoResponse, YandexDevice, YandexScenario, YandexGroup, TrayMenuItem, TrayItemType, YandexHousehold } from './types/index';
 import { formatSensorValueForTray, TraySensorDisplayConfig } from './constants';
 import { stableSortData } from './utils/dataUtils';
 import { cleanErrorMessage } from './utils/errors';
@@ -108,6 +108,7 @@ function App() {
         data: YandexUserInfoResponse | null,
         favDevices: string[],
         favScenarios: string[],
+        favGroups: string[],
         householdId: string | null
     ): TrayMenuItem[] => {
         if (!data) return [];
@@ -156,7 +157,37 @@ function App() {
                 };
             });
 
-        // 2. Избранные сценарии
+        // 2. Избранные группы
+        const favGroupItems: TrayMenuItem[] = favGroups
+            .map(id => data.groups.find(g => g.id === id))
+            .filter((g): g is YandexGroup => !!g)
+            .map(group => {
+                const onOffCapability = group.capabilities.find(c => c.type === 'devices.capabilities.on_off');
+                const isToggleable = !!onOffCapability;
+
+                // Группа считается включённой, только если ВСЕ устройства с on_off capability включены
+                const devicesWithOnOff = group.devices
+                    .map(id => deviceMap.get(id))
+                    .filter((d): d is YandexDevice =>
+                        !!d && d.capabilities.some(c => c.type === 'devices.capabilities.on_off')
+                    );
+                const isGroupOn = isToggleable && devicesWithOnOff.length > 0 &&
+                    devicesWithOnOff.every(d =>
+                        d.capabilities.some(c =>
+                            c.type === 'devices.capabilities.on_off' && c.state?.value === true
+                        )
+                    );
+
+                return {
+                    id: group.id,
+                    name: group.name,
+                    type: 'group' as TrayItemType,
+                    isToggleable: isToggleable,
+                    isOn: isGroupOn,
+                };
+            });
+
+        // 3. Избранные сценарии
         const favScenarioItems: TrayMenuItem[] = favScenarios
             .map(id => scenarioMap.get(id))
             .filter((s): s is YandexScenario => !!s)
@@ -166,28 +197,30 @@ function App() {
                 type: 'scenario' as TrayItemType,
             }));
 
-        return [...favDeviceItems, ...favScenarioItems];
+        return [...favDeviceItems, ...favGroupItems, ...favScenarioItems];
     }, []);
 
     // --- 3. Tray-эффект (отправка избранного в трей) ---
     useEffect(() => {
         if (appState === AppState.DASHBOARD && userData) {
-            const trayItems = getTrayMenuItems(userData, favoriteDeviceIds, favoriteScenarioIds, activeHouseholdId);
+            const trayItems = getTrayMenuItems(userData, favoriteDeviceIds, favoriteScenarioIds, favoriteGroupIds, activeHouseholdId);
             yandexApi.sendFavoritesToTray(trayItems);
         }
-    }, [appState, userData, favoriteDeviceIds, favoriteScenarioIds, activeHouseholdId, getTrayMenuItems]);
+    }, [appState, userData, favoriteDeviceIds, favoriteScenarioIds, favoriteGroupIds, activeHouseholdId, getTrayMenuItems]);
 
     // --- 4. Tray-эффект (обработка команд из трея) ---
     useEffect(() => {
         yandexApi.onTrayCommand((command: string, id: string, currentState: boolean | undefined) => {
             if (command === 'TOGGLE_DEVICE' && typeof currentState === 'boolean') {
                 handleToggleDevice(id, currentState).catch(() => {});
+            } else if (command === 'TOGGLE_GROUP' && typeof currentState === 'boolean') {
+                handleToggleGroup(id, currentState).catch(() => {});
             } else if (command === 'EXECUTE_SCENARIO') {
                 handleExecuteScenario(id).catch(() => {});
             }
         });
         return () => { yandexApi.removeTrayCommandListener(); };
-    }, [handleToggleDevice, handleExecuteScenario, token]);
+    }, [handleToggleDevice, handleToggleGroup, handleExecuteScenario, token]);
 
     // --- 5. Polling-эффект (автосинхронизация) ---
     useEffect(() => {

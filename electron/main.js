@@ -121,12 +121,20 @@ function buildTrayMenu() {
     const favoriteMenuItems = favoritesData.map(item => {
         const isDevice = item.type === 'device';
         const isToggleableDevice = isDevice && item.isToggleable;
+        const isGroup = item.type === 'group';
+        const isToggleableGroup = isGroup && item.isToggleable;
         
         let deviceStatus = '';
         if (isDevice) {
             if (item.sensorValue) {
                 deviceStatus = ` ${item.sensorValue}`;
             } else if (isToggleableDevice) {
+                deviceStatus = item.isOn
+                    ? ' 🟢'
+                    : ' 🔴';
+            }
+        } else if (isGroup) {
+            if (isToggleableGroup) {
                 deviceStatus = item.isOn
                     ? ' 🟢'
                     : ' 🔴';
@@ -140,6 +148,12 @@ function buildTrayMenu() {
             clickAction = () => {
                 if (mainWindow && !mainWindow.isDestroyed()) {
                     mainWindow.webContents.send('tray:execute-command', 'TOGGLE_DEVICE', item.id, item.isOn);
+                }
+            };
+        } else if (isToggleableGroup) {
+            clickAction = () => {
+                if (mainWindow && !mainWindow.isDestroyed()) {
+                    mainWindow.webContents.send('tray:execute-command', 'TOGGLE_GROUP', item.id, item.isOn);
                 }
             };
         } else if (item.type === 'scenario') {

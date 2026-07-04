@@ -130,7 +130,7 @@ export enum AppState {
   ERROR = 'ERROR'
 }
 
-export type TrayItemType = 'device' | 'scenario';
+export type TrayItemType = 'device' | 'group' | 'scenario';
 
 export interface TrayMenuItem {
     id: string;
