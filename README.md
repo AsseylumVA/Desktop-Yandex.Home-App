@@ -3,6 +3,11 @@
 
 В процессе написания приложения использовалась официальная документация [API Яндекс Умный Дом](https://yandex.ru/dev/dialogs/smart-home/doc/ru/concepts/platform-quickstart)
 
+![GitHub Downloads (all assets, all releases)](https://img.shields.io/github/downloads/onegamerstory/Desktop-Yandex.Home-App/total)
+![GitHub Repo stars](https://img.shields.io/github/stars/onegamerstory/Desktop-Yandex.Home-App)
+![GitHub Release](https://img.shields.io/github/v/release/onegamerstory/Desktop-Yandex.Home-App)
+
+
 # 🎯 Возможности
 - 🖥️ Работа на всех ПК-платформах: Windows, MacOS, Linux
 - ⚡ Запуск сценариев
