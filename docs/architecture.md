@@ -1,8 +1,8 @@
 # Архитектура Yandex Smart Home Control
 
-> **Версия документа:** 1.1  
+> **Версия документа:** 1.2  
 > **Дата:** 4 июля 2026 г.  
-> **Версия приложения:** 1.8.1-beta  
+> **Версия приложения:** 1.9.0-beta  
 > **Назначение:** Описание общей архитектуры, стека технологий, потоков данных и контрактов между модулями проекта Yandex Smart Home Control
 > **Аудитория:** Разработчики, архитекторы
 
@@ -28,6 +28,14 @@
   - [10.6. Изменённые файлы](#106-изменённые-файлы)
   - [10.7. Edge Cases](#107-edge-cases)
   - [10.8. Ключевые принципы](#108-ключевые-принципы)
+- [11. Декомпозиция Sidebar](#11-декомпозиция-sidebar)
+  - [11.1. Проблема](#111-проблема)
+  - [11.2. Решение](#112-решение)
+  - [11.3. Архитектура подкомпонентов](#113-архитектура-подкомпонентов)
+  - [11.4. Поток данных через контекст](#114-поток-данных-через-контекст)
+  - [11.5. Схема collapsed-секций](#115-схема-collapsed-секций)
+  - [11.6. Оптимизация мемоизации GroupCard](#116-оптимизация-мемоизации-groupcard)
+  - [11.7. Изменённые файлы](#117-изменённые-файлы)
 - [Связанные документы](#связанные-документы)
 
 ---
@@ -161,23 +169,19 @@
         ├── <QrAuthModal />           // Модалка QR-авторизации (условно)
         ├── <UpdateNotificationModal /> // Модалка обновлений (условно)
         │
-        └── <Dashboard                // Dashboard.tsx — GOD-компонент (~1115 строк)
-               data={userData}
-               households={...}
-               activeHouseholdId={...}
-               favoriteDeviceIds={...}
-               onToggleDevice={...}
-               /* и ещё 25 пропсов — всего 30 */>
+        └── <Dashboard                // Dashboard.tsx (~417 строк)
+               /* использует useDashboardContext()
+                  и useDashboardState() */>
               │
-              ├── <Sidebar             // 23 пропса
-              │      households={...}
-              │      roomsForHome={...}
-              │      groupsForHome={...}
-              │      devicesForHome={...}
-              │      favoriteDeviceIds={...}
-              │      activeSidebarView={...}
-              │      onToggleDevice={...}
-              │      /* и ещё 16 пропсов */>
+              ├── <Sidebar             // 1 пропс: onOpenCameraStream
+              │      /* использует useDashboardContext() */>
+              │      │
+              │      ├── <SidebarHeader />       // Household selector
+              │      ├── <SidebarFavorites />    // Избранные устройства
+              │      ├── <SidebarSensors />      // Датчики
+              │      ├── <SidebarRooms />        // Комнаты
+              │      ├── <SidebarGroups />       // Группы устройств
+              │      └── <SidebarScenarios />    // Сценарии
               │
               ├── <ScenarioCard        // Карточка сценария
               │      scenario={...}
@@ -185,6 +189,7 @@
               │      onToggleFavorite={...} />
               │
               ├── <GroupCard           // Карточка группы
+              │      /* 7 useMemo → 2 (groupDevices + groupInfo) */
               │      group={...}
               │      devices={...}
               │      isFavorite={...}
@@ -297,12 +302,18 @@
 | `src/index.tsx`                     | Точка входа React                                 | ~15   |
 | `src/index.css`                     | Глобальные стили, CSS переменные                   | ~200  |
 | `src/constants.tsx`                 | **GOD**: свальник констант, хелперов, маппингов  | 413   |
-| `src/components/Dashboard.tsx`      | **GOD**: панель, модалки, фильтрация              | 1115  |
-| `src/components/Sidebar.tsx`        | Навигация, список комнат/групп/сценариев          | 358   |
+| `src/components/Dashboard.tsx`      | Панель, модалки, фильтрация (использует useDashboardContext) | 417   |
+| `src/components/Sidebar.tsx`        | Навигация: 1 пропс, 6 подкомпонентов, контекст    | 164   |
+| `src/components/sidebar/SidebarHeader.tsx` | Выбор домохозяйства (household selector)     | ~30   |
+| `src/components/sidebar/SidebarFavorites.tsx` | Избранные устройства                      | ~60   |
+| `src/components/sidebar/SidebarSensors.tsx` | Датчики                                  | ~35   |
+| `src/components/sidebar/SidebarRooms.tsx` | Комнаты                                  | ~50   |
+| `src/components/sidebar/SidebarGroups.tsx` | Группы устройств                         | ~40   |
+| `src/components/sidebar/SidebarScenarios.tsx` | Сценарии                              | ~60   |
 | `src/components/TokenInput.tsx`     | Форма ввода токена                                 | ~80   |
 | `src/components/cards/DeviceCard.tsx` | Карточка устройства                              | 201   |
 | `src/components/cards/ScenarioCard.tsx` | Карточка сценария                              | 77    |
-| `src/components/cards/GroupCard.tsx` | Карточка группы                                  | 155   |
+| `src/components/cards/GroupCard.tsx` | Карточка группы (7 useMemo → 2, багфикс groupIsOn) | 151   |
 | `src/components/modals/` (10 файлов)| Модальные окна (настройки, стрим, инфо, обновления)| разное |
 | `src/contexts/ThemeContext.tsx`      | Провайдер темы (light/dark)                       | 55    |
 | `src/services/yandexIoT.ts`         | Сервис-слой: вызовы IPC (77% — мок-функция)       | 741   |
@@ -550,6 +561,152 @@ DashboardGroupView.tsx
 2. **Хук `useDashboardState` ничего не знает о том, какой view его использует.** Все функции (getEffectiveHidden, getIconHiddenState и т.д.) доступны всегда — это ответственность view-компонента решать, какие из них передавать карточкам.
 3. **Сброс edit mode при навигации — страховочный механизм.** Даже если view случайно передаст isEditMode карточке, значение будет `false`, и UI скрытия не появится.
 4. **Данные не теряются.** localStorage сохраняет скрытые карточки даже при переключении между страницами. Пользователь не потеряет настройки отображения.
+
+## 11. Декомпозиция Sidebar
+
+> **Версия:** 1.0  
+> **Дата:** 4 июля 2026 г.  
+> **Статус:** Реализовано (Приоритет 3)
+
+### 11.1. Проблема
+
+Компонент `Sidebar.tsx` (358 строк) принимал **25 пропсов**, большинство из которых дублировали данные из контекста дашборда. Каждый новый пропс требовал изменений в трёх местах:
+- определение пропсов в `Sidebar.tsx`
+- передача в `Dashboard.tsx`
+- обновление в `App.tsx` (через цепочку App → Dashboard → Sidebar)
+
+Это тормозило разработку и усложняло тестирование.
+
+### 11.2. Решение
+
+1. **Sidebar переведён на `useDashboardContext()`** — все данные читаются напрямую из контекста, без prop drilling.
+2. **25 пропсов → 1 пропс** (`onOpenCameraStream`) — единственный пропс, которого нет в контексте.
+3. **Декомпозиция на 6 подкомпонентов** — каждый отвечает за свою секцию.
+4. **Оптимизация `GroupCard`** — сопутствующий рефакторинг мемоизации.
+
+### 11.3. Архитектура подкомпонентов
+
+```
+Sidebar.tsx
+│   Пропсы: { onOpenCameraStream? }
+│   Состояние: loadingItems, collapsedSections
+│
+├── SidebarHeader.tsx
+│   Через контекст: households, activeHouseholdId, onSelectHousehold
+│   Роль: выпадающий список домохозяйств
+│
+├── SidebarFavorites.tsx
+│   Пропсы: collapsed, onToggle, loadingItems, withLoading, onOpenCameraStream
+│   Через контекст: favoriteDeviceIds, data.devices, onToggleFavorite, onOpenSettings
+│   Роль: список избранных устройств
+│
+├── SidebarSensors.tsx
+│   Пропсы: collapsed, onToggle
+│   Через контекст: data.devices, isSensorDevice, data.rooms, activeHouseholdId
+│   Роль: список датчиков
+│
+├── SidebarRooms.tsx
+│   Пропсы: collapsed, onToggle
+│   Через контекст: data.rooms, activeRoomId, onSelectRoom
+│   Роль: список комнат
+│
+├── SidebarGroups.tsx
+│   Пропсы: collapsed, onToggle
+│   Через контекст: data.groups, activeGroupId, onSelectGroup
+│   Роль: список групп
+│
+└── SidebarScenarios.tsx
+    Пропсы: collapsed, onToggle, loadingItems, withLoading, scenarios
+    Через контекст: onExecuteScenario
+    Роль: список сценариев
+```
+
+### 11.4. Поток данных через контекст
+
+Вместо цепочки `App.tsx → Dashboard.tsx → Sidebar.tsx` данные теперь поступают через `DashboardContext`:
+
+```
+App.tsx                              // Владелец данных
+  │
+  ├──<DashboardContext.Provider>     // Провайдер контекста
+  │    │
+  │    ├── Dashboard.tsx             // Читает ctx.data, ctx.activeSidebarView и т.д.
+  │    │
+  │    └── Sidebar.tsx               // Читает ctx.data, ctx.activeHouseholdId,
+  │         │                        //         ctx.activeSidebarView, ctx.onSelect* и т.д.
+  │         ├── SidebarHeader.tsx    // Читает ctx.households, ctx.activeHouseholdId
+  │         ├── SidebarRooms.tsx     // Читает ctx.data.rooms, ctx.activeRoomId
+  │         ├── SidebarGroups.tsx    // Читает ctx.data.groups, ctx.activeGroupId
+  │         └── ...                  // Все подкомпоненты
+  │
+  └── DashboardContext               // Определение типов контекста
+```
+
+**Преимущества:**
+- Устранён prop drilling (25 пропсов → 1)
+- Каждый подкомпонент читает только нужные ему поля контекста
+- Dashboard перестал быть транзитом данных для Sidebar
+- `Dashboard.tsx` сократился с ~1115 до ~417 строк
+
+### 11.5. Схема collapsed-секций
+
+Sidebar управляет состоянием свёрнутых секций через `localStorage` с привязкой к домохозяйству:
+
+```
+Состояние: collapsedSections: Record<string, boolean>
+Ключ:      'sidebar:collapsedSections:household:{activeHouseholdId}'
+
+Поток:
+1. Загрузка: useEffect → localStorage.getItem(...) → setCollapsedSections
+2. Переключение: toggleSection(key) → обновление state + localStorage.setItem(...)
+3. Смена household: useEffect [activeHouseholdId] → перезагрузка
+```
+
+Секции: `favorites`, `sensors`, `rooms`, `groups`, `scenarios`.
+
+### 11.6. Оптимизация мемоизации GroupCard
+
+**До:** 7 `useMemo` в `GroupCard`:
+```
+useMemo 1: groupDevices = devices.filter(d => group.devices.includes(d.id))
+useMemo 2: isLightGroup — проверка всех устройств
+useMemo 3: isThermostatGroup — проверка всех устройств
+useMemo 4: isFanGroup — проверка всех устройств
+useMemo 5: groupIsOn — подсчёт on_off состояний
+useMemo 6: hasOnOffCapability
+useMemo 7: visibleDevices — фильтрация hidden
+```
+
+**После:** 2 `useMemo`:
+```
+useMemo 1: groupDevices = devices.filter(d => group.devices.includes(d.id))
+useMemo 2: groupInfo — ОДИН проход по groupDevices:
+             • определение типа группы (light/thermostat/fan)
+             • подсчёт on_off состояний (багфикс)
+             • фильтрация visibleDevices
+           Результат: { isLightGroup, isThermostatGroup, isFanGroup,
+                        groupIsOn, hasOnOffCapability, visibleDevices }
+```
+
+**Багфикс `groupIsOn`:**
+- **Было:** `groupIsOn = devices.every(...)` — проверял все устройства, даже без on_off capability.
+- **Стало:** `groupIsOn = totalOnOff > 0 && onCount === totalOnOff` — проверяет только устройства с on_off capability.
+
+### 11.7. Изменённые файлы
+
+| Файл | Изменение |
+|------|-----------|
+| `src/components/cards/GroupCard.tsx` | 7 useMemo → 2, объединённая логика в groupInfo, багфикс groupIsOn |
+| `src/components/Sidebar.tsx` | Полностью переписан: 25 пропсов → 1, useDashboardContext, 6 подкомпонентов |
+| `src/components/sidebar/SidebarHeader.tsx` | Новый: household selector |
+| `src/components/sidebar/SidebarFavorites.tsx` | Новый: избранные |
+| `src/components/sidebar/SidebarSensors.tsx` | Новый: датчики |
+| `src/components/sidebar/SidebarRooms.tsx` | Новый: комнаты |
+| `src/components/sidebar/SidebarGroups.tsx` | Новый: группы |
+| `src/components/sidebar/SidebarScenarios.tsx` | Новый: сценарии |
+| `src/components/Dashboard.tsx` | Упрощён вызов `<Sidebar onOpenCameraStream={...} />` |
+
+---
 
 ## Связанные документы
 

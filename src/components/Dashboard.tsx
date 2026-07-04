@@ -245,31 +245,7 @@ export const Dashboard: React.FC = () => {
     return (
         <div className="window">
             <div className="body">
-                <Sidebar
-                    households={ctx.households}
-                    activeHouseholdId={ctx.activeHouseholdId}
-                    onSwitchHousehold={ctx.onSwitchHousehold}
-                    roomsForHome={roomsForHome}
-                    groupsForHome={groupsForHome}
-                    activeScenarios={activeScenarios}
-                    devicesForHome={devicesForHome}
-                    favoriteDeviceIds={ctx.favoriteDeviceIds}
-                    favoriteScenarioIds={ctx.favoriteScenarioIds}
-                    favoriteGroupIds={ctx.favoriteGroupIds}
-                    onToggleDeviceFavorite={ctx.onToggleDeviceFavorite}
-                    onToggleScenarioFavorite={ctx.onToggleScenarioFavorite}
-                    onToggleGroupFavorite={ctx.onToggleGroupFavorite}
-                    onExecuteScenario={ctx.onExecuteScenario}
-                    onToggleDevice={ctx.onToggleDevice}
-                    onOpenCameraStream={state.openCameraStream}
-                    onToggleGroup={ctx.onToggleGroup}
-                    activeSidebarView={ctx.activeSidebarView}
-                    activeRoomId={ctx.activeRoomId}
-                    activeGroupId={ctx.activeGroupId}
-                    onSelectHome={ctx.onSelectHome}
-                    onSelectRoom={ctx.onSelectRoom}
-                    onSelectGroup={ctx.onSelectGroup}
-                />
+                <Sidebar onOpenCameraStream={state.openCameraStream} />
                 <main className="content">
                     <div className="content-header">
                         <div>

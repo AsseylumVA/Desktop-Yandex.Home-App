@@ -2,7 +2,7 @@ import React, { useState, useMemo } from 'react';
 import { YandexGroup, YandexDevice } from '../../types/index';
 import { DeviceCardAdapter } from './DeviceCardAdapter';
 import { Loader2, Power, ChevronDown, ChevronRight, Settings, Star } from 'lucide-react';
-import { isLightGroup } from '../../constants';
+
 
 interface GroupCardProps {
   group: YandexGroup;
@@ -44,45 +44,51 @@ export const GroupCard: React.FC<GroupCardProps> = ({
     return devices.filter(d => group.devices.includes(d.id));
   }, [devices, group.devices]);
 
-  const isLightGroupCheck = useMemo(() => isLightGroup(groupDevices), [groupDevices]);
+  const groupInfo = useMemo(() => {
+    if (groupDevices.length === 0) {
+      return {
+        isLightGroup: false,
+        isThermostatGroup: false,
+        isFanGroup: false,
+        groupIsOn: false,
+        hasOnOffCapability: group.capabilities.some(c => c.type === 'devices.capabilities.on_off'),
+        visibleDevices: [] as YandexDevice[],
+      };
+    }
 
-  const isThermostatGroup = useMemo(() => {
-    return groupDevices.length > 0 && groupDevices.every(d =>
-      d.type === 'devices.types.thermostat.ac' || d.type === 'devices.types.thermostat'
-    );
-  }, [groupDevices]);
+    let isLight = true, isThermostat = true, isFan = true;
+    let onCount = 0, totalOnOff = 0;
 
-  const isFanGroup = useMemo(() => {
-    return groupDevices.length > 0 && groupDevices.every(d => d.type === 'devices.types.ventilation.fan');
-  }, [groupDevices]);
+    for (const d of groupDevices) {
+      if (!d.type.startsWith('devices.types.light')) isLight = false;
+      if (!(d.type === 'devices.types.thermostat.ac' || d.type === 'devices.types.thermostat')) isThermostat = false;
+      if (d.type !== 'devices.types.ventilation.fan') isFan = false;
+      const onOffCap = d.capabilities.find(c => c.type === 'devices.capabilities.on_off');
+      if (onOffCap) {
+        totalOnOff++;
+        if (onOffCap.state?.value === true) onCount++;
+      }
+    }
 
-  const groupIsOn = useMemo(() => {
-    if (groupDevices.length === 0) return false;
-    const onDevices = groupDevices.filter(d => {
-      const onOffCapability = d.capabilities.find(c => c.type === 'devices.capabilities.on_off');
-      return onOffCapability?.state?.value === true;
-    });
-    return onDevices.length === groupDevices.length;
-  }, [groupDevices]);
+    const onOffCap = group.capabilities.find(c => c.type === 'devices.capabilities.on_off');
 
-  const hasOnOffCapability = useMemo(() => {
-    return group.capabilities.some(c => c.type === 'devices.capabilities.on_off');
-  }, [group.capabilities]);
-
-  const groupIsEnabled = useMemo(() => {
-    const capability = group.capabilities.find(c => c.type === 'devices.capabilities.on_off');
-    return capability?.state?.value === true;
-  }, [group.capabilities]);
+    return {
+      isLightGroup: isLight,
+      isThermostatGroup: isThermostat,
+      isFanGroup: isFan,
+      groupIsOn: totalOnOff > 0 && onCount === totalOnOff,
+      hasOnOffCapability: !!onOffCap,
+      visibleDevices: groupDevices.filter(d => !getEffectiveHidden(`device_${d.id}`)),
+    };
+  }, [groupDevices, group.capabilities, getEffectiveHidden]);
 
   const handleToggleGroup = async () => {
-    if (!hasOnOffCapability || loading) return;
+    if (!groupInfo.hasOnOffCapability || loading) return;
     setLoading(true);
-    try { await onToggleGroup(group.id, groupIsOn); }
+    try { await onToggleGroup(group.id, groupInfo.groupIsOn); }
     catch (err) { console.error(err); }
     finally { setLoading(false); }
   };
-
-  const visibleDevices = groupDevices.filter(d => !getEffectiveHidden(`device_${d.id}`));
 
   return (
     <div className="group-wrapper" style={{ opacity: isEditMode && getIconHiddenState(`group_${group.id}`) ? 0.5 : 1, filter: isEditMode && getIconHiddenState(`group_${group.id}`) ? 'grayscale(1)' : 'none' }}>
@@ -101,7 +107,7 @@ export const GroupCard: React.FC<GroupCardProps> = ({
               <Star className="w-3.5 h-3.5" fill={isFavorite ? 'currentColor' : 'none'} />
             </div>
           )}
-          {(isLightGroupCheck || isThermostatGroup || isFanGroup) && onOpenGroupSettings && (
+          {(groupInfo.isLightGroup || groupInfo.isThermostatGroup || groupInfo.isFanGroup) && onOpenGroupSettings && (
             <button
               onClick={() => onOpenGroupSettings(group)}
               className="group-power-btn"
@@ -110,12 +116,12 @@ export const GroupCard: React.FC<GroupCardProps> = ({
               <Settings />
             </button>
           )}
-          {hasOnOffCapability && (
+          {groupInfo.hasOnOffCapability && (
             <button
               onClick={handleToggleGroup}
               disabled={loading}
-              className={`group-power-btn ${groupIsOn ? 'is-on' : ''}`}
-              title={groupIsOn ? 'Выключить' : 'Включить'}
+              className={`group-power-btn ${groupInfo.groupIsOn ? 'is-on' : ''}`}
+              title={groupInfo.groupIsOn ? 'Выключить' : 'Включить'}
             >
               {loading ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Power />}
             </button>
@@ -125,9 +131,9 @@ export const GroupCard: React.FC<GroupCardProps> = ({
 
       {!isCollapsed && (
         <>
-          {visibleDevices.length > 0 ? (
+          {groupInfo.visibleDevices.length > 0 ? (
             <div className="device-grid">
-              {visibleDevices.map(device => (
+              {groupInfo.visibleDevices.map(device => (
                 <DeviceCardAdapter key={device.id} device={device} onToggle={onToggleDevice} isFavorite={favoriteDeviceIds.includes(device.id)} onToggleFavorite={onToggleDeviceFavorite} onOpenSettings={onOpenSettings} isEditMode={isEditMode} iconHiddenState={getIconHiddenState(`device_${device.id}`)} onToggleVisibility={() => onToggleDeviceVisibility?.(`device_${device.id}`)} />
               ))}
             </div>
