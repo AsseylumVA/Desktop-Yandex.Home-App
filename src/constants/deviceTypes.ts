@@ -30,5 +30,7 @@ export const isAlwaysOnDevice = (device: YandexDevice): boolean => {
 };
 
 export const isSensorDevice = (device: { type: string }): boolean => {
-    return device.type.startsWith('devices.types.sensor') || device.type === 'devices.types.smart_meter';
+    return device.type.startsWith('devices.types.sensor')
+        || device.type === 'devices.types.smart_meter'
+        || device.type.startsWith('devices.types.cradle');
 };

@@ -29,6 +29,17 @@ export const localizeUnit = (unitCode: string | undefined): string => {
 };
 
 /**
+ * Formats a float value to a fixed number of decimal places, removing trailing zeros.
+ * @param value - The number to format
+ * @param decimalPlaces - Number of decimal places (default: 1)
+ * @returns Formatted string (e.g., 45.0 → "45", 24.5 → "24.5", 24.1038 → "24.1")
+ */
+export function formatFloatValue(value: number, decimalPlaces: number = 1): string {
+    if (!Number.isFinite(value)) return String(value);
+    return String(Number(value.toFixed(decimalPlaces)));
+}
+
+/**
  * Formats a sensor value for display, handling both event and float properties
  * @param device - The Yandex device containing properties
  * @returns Formatted sensor value string (e.g., "24.5 °C", "закрыто", "3758.142 м³") or null if no sensor value found

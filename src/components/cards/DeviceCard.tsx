@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { YandexDevice } from '../../types/index';
-import { getIconForDevice, localizeUnit, isCameraDevice, isAlwaysOnDevice } from '../../constants';
+import { getIconForDevice, localizeUnit, isCameraDevice, isAlwaysOnDevice, formatFloatValue } from '../../constants';
 import { Loader2, Star, Settings, Eye, EyeOff, Video, Mic, MicOff, Thermometer, Droplets } from 'lucide-react';
 import { SensorDisplayConfig } from '../modals/SensorSettingsModal';
 
@@ -107,9 +107,9 @@ export const DeviceCard: React.FC<DeviceCardProps> = ({ device, onToggle, isFavo
   const formattedSensorValue = isEventProperty && localizedEventValue
     ? localizedEventValue
     : typeof rawSensorValue === 'number'
-      ? `${rawSensorValue}${resolvedUnit ?? ''}`
+      ? `${formatFloatValue(rawSensorValue)}${resolvedUnit ?? ''}`
       : typeof rawSensorValue === 'string'
-        ? `${rawSensorValue}${resolvedUnit ?? ''}`
+      ? `${rawSensorValue}${resolvedUnit ?? ''}`
         : null;
 
   const handleClick = async () => {
@@ -188,14 +188,14 @@ export const DeviceCard: React.FC<DeviceCardProps> = ({ device, onToggle, isFavo
               {temperatureValue !== null && (
                 <span style={{ display: 'inline-flex', alignItems: 'center', gap: 2 }}>
                   <Thermometer className="w-3.5 h-3.5" style={{ opacity: 0.75 }} />
-                  {`${temperatureValue}${temperatureUnit}`}
+                  {`${formatFloatValue(temperatureValue)}${temperatureUnit}`}
                 </span>
               )}
               {temperatureValue !== null && humidityValue !== null && <span style={{ margin: '0 3px' }}>·</span>}
               {humidityValue !== null && (
                 <span style={{ display: 'inline-flex', alignItems: 'center', gap: 2 }}>
                   <Droplets className="w-3.5 h-3.5" style={{ opacity: 0.75 }} />
-                  {`${humidityValue}${humidityUnit}`}
+                  {`${formatFloatValue(humidityValue)}${humidityUnit}`}
                 </span>
               )}
             </span>
