@@ -83,26 +83,31 @@ const withRetry = async (asyncFn, onRetryAttempt = null) => {
     throw lastError;
 };
 
-// 1. Получение информации о пользователе
-export const fetchUserInfo = async (token, onRetryAttempt = null) => {
-    return withRetry(async () => {
-        const response = await fetch(`${BASE_URL}/user/info`, {
-            method: 'GET',
-            headers: {
-                'Authorization': `Bearer ${token}`,
-                'Content-Type': 'application/json',
-            },
-        });
+const fetchUserInfoOnce = async (token) => {
+    const response = await fetch(`${BASE_URL}/user/info`, {
+        method: 'GET',
+        headers: {
+            'Authorization': `Bearer ${token}`,
+            'Content-Type': 'application/json',
+        },
+    });
 
-        if (!response.ok) {
-            if (response.status === 401 || response.status === 403) {
-                throw new Error('Ошибка авторизации. Проверьте ваш токен.');
-            }
-            throw new Error(`Не удалось загрузить список устройств. Попробуйте позже.`);
+    if (!response.ok) {
+        if (response.status === 401 || response.status === 403) {
+            throw new Error('Ошибка авторизации. Проверьте ваш токен.');
         }
+        throw new Error(`Ошибка загрузки данных: ${response.status} ${response.statusText}`);
+    }
 
-        return await response.json();
-    }, onRetryAttempt);
+    return await response.json();
+};
+
+// 1. Получение информации о пользователе
+export const fetchUserInfo = async (token, onRetryAttempt = null, { retry = true } = {}) => {
+    if (!retry) {
+        return fetchUserInfoOnce(token);
+    }
+    return withRetry(() => fetchUserInfoOnce(token), onRetryAttempt);
 };
 
 // 1.1 Получение информации об устройстве по ID
@@ -120,7 +125,7 @@ export const fetchDevice = async (token, deviceId, onRetryAttempt = null) => {
             if (response.status === 401 || response.status === 403) {
                 throw new Error('Ошибка авторизации. Проверьте ваш токен.');
             }
-            throw new Error(`Не удалось загрузить данные устройства`);
+            throw new Error(`Не удалось получить устройство ${deviceId}: ${response.status} ${response.statusText}`);
         }
 
         return await response.json();
@@ -139,7 +144,7 @@ export const executeScenario = async (token, scenarioId, onRetryAttempt = null) 
         });
 
         if (!response.ok) {
-            throw new Error(`Не удалось запустить сценарий. Попробуйте позже.`);
+            throw new Error(`Не удалось запустить сценарий: ${response.status}`);
         }
     }, onRetryAttempt);
 };
@@ -174,13 +179,13 @@ export const toggleDevice = async (token, deviceId, newState, onRetryAttempt = n
         });
 
         if (!response.ok) {
-            throw new Error(`Не удалось переключить устройство. Попробуйте позже.`);
+            throw new Error(`Не удалось изменить состояние устройства: ${response.status}`);
         }
         
         const data = await response.json();
         const deviceResult = data.devices?.find((d) => d.id === deviceId);
         if (deviceResult && 'error_code' in deviceResult) {
-            throw new Error(`Не удалось переключить устройство. Попробуйте позже.`);
+            throw new Error(`Ошибка устройства: ${deviceResult.error_message || deviceResult.error_code}`);
         }
     }, onRetryAttempt);
 };
@@ -254,13 +259,13 @@ export const setDeviceMode = async (token, deviceId, modeActions, turnOn = false
         });
 
         if (!response.ok) {
-            throw new Error(`Не удалось изменить настройки устройства. Попробуйте позже.`);
+            throw new Error(`Не удалось изменить режим устройства: ${response.status}`);
         }
         
         const data = await response.json();
         const deviceResult = data.devices?.find((d) => d.id === deviceId);
         if (deviceResult && 'error_code' in deviceResult) {
-            throw new Error(`Не удалось изменить настройки устройства. Попробуйте позже.`);
+            throw new Error(`Ошибка устройства: ${deviceResult.error_message || deviceResult.error_code}`);
         }
     }, onRetryAttempt);
 };
@@ -297,13 +302,14 @@ export const toggleGroup = async (token, groupId, deviceIds, newState, onRetryAt
         });
 
         if (!response.ok) {
-            throw new Error(`Не удалось переключить группу. Попробуйте позже.`);
+            throw new Error(`Не удалось переключить группу: ${response.status}`);
         }
 
         const data = await response.json();
         const errors = (data.devices || []).filter(d => 'error_code' in d);
         if (errors.length > 0) {
-            throw new Error(`Не удалось переключить группу. Попробуйте позже.`);
+            const firstError = errors[0];
+            throw new Error(`Ошибка устройства: ${firstError.error_message || firstError.error_code}`);
         }
     }, onRetryAttempt);
 };
@@ -337,19 +343,23 @@ const sendIotDeviceAction = async (token, deviceId, action, onRetryAttempt = nul
         });
 
         if (!response.ok) {
-            throw new Error(`Не удалось изменить параметр. Попробуйте позже.`);
+            throw new Error(`Не удалось изменить параметр устройства: ${response.status}`);
         }
 
         const data = await response.json();
         const deviceResult = data.devices?.find((d) => d.id === deviceId);
         if (deviceResult && 'error_code' in deviceResult) {
-            throw new Error(`Не удалось изменить параметр. Попробуйте позже.`);
+            throw new Error(deviceResult.error_message || deviceResult.error_code);
         }
     }, onRetryAttempt);
 };
 
-export const getQuasarCameraDevice = async (xToken, deviceId, onRetryAttempt = null) => {
-    return withRetry(async () => getQuasarDevice(xToken, deviceId), onRetryAttempt);
+export const getQuasarCameraDevice = async (xToken, deviceId, onRetryAttempt = null, { retry = true } = {}) => {
+    const fn = () => getQuasarDevice(xToken, deviceId);
+    if (!retry) {
+        return fn();
+    }
+    return withRetry(fn, onRetryAttempt);
 };
 
 export const setCameraPrivacyMode = async (
