@@ -7,6 +7,7 @@ import { getQuasarCameraDevice } from '../../services/yandexIoT';
 import {
   hasCameraPrivacyControl,
   isCameraPrivacyModeEnabled,
+  isYandexCameraDevice,
   mergeCameraDeviceState,
   getCameraPrivacyInstance,
 } from '../../constants';
@@ -603,7 +604,7 @@ export const CameraStreamModal: React.FC<CameraStreamModalProps> = ({
     loadStreamRef.current?.(true);
   }, []);
 
-  // Boost camera audio above the HTMLMediaElement 1.0 volume cap (WebRTC / HLS).
+  // Boost Yandex camera audio above the HTMLMediaElement 1.0 volume cap (mics are often quiet).
   useEffect(() => {
     if (!isOpen || !streamProtocol) return;
     const video = videoRef.current;
@@ -611,13 +612,15 @@ export const CameraStreamModal: React.FC<CameraStreamModalProps> = ({
 
     video.muted = false;
     video.volume = 1;
-    audioBoostRef.current = attachVideoAudioBoost(video);
+    if (isYandexCameraDevice(cameraDevice)) {
+      audioBoostRef.current = attachVideoAudioBoost(video);
+    }
 
     return () => {
       audioBoostRef.current?.release();
       audioBoostRef.current = null;
     };
-  }, [isOpen, streamProtocol]);
+  }, [isOpen, streamProtocol, cameraDevice]);
 
   // Hide freeze-frame overlay once the live stream resumes
   useEffect(() => {
