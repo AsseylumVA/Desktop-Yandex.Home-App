@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { isSensorDevice, isLightDevice, isCameraDevice, isAlwaysOnDevice, isLightGroup } from './deviceTypes';
+import { isSensorDevice, isLightDevice, isCameraDevice, isYandexCameraDevice, isAlwaysOnDevice, isLightGroup } from './deviceTypes';
 
 describe('isSensorDevice', () => {
     it('should return true for devices.types.sensor.temperature', () => {
@@ -98,6 +98,26 @@ describe('isCameraDevice', () => {
         expect(isCameraDevice({
             type: 'devices.types.light',
             capabilities: [],
+            id: 'test',
+            name: 'test',
+        } as any)).toBe(false);
+    });
+});
+
+describe('isYandexCameraDevice', () => {
+    it('should return true for native Yandex camera types', () => {
+        expect(isYandexCameraDevice({
+            type: 'devices.types.camera',
+            capabilities: [],
+            id: 'test',
+            name: 'test',
+        } as any)).toBe(true);
+    });
+
+    it('should return false for partner cameras with video_stream on other types', () => {
+        expect(isYandexCameraDevice({
+            type: 'devices.types.other',
+            capabilities: [{ type: 'devices.capabilities.video_stream' }],
             id: 'test',
             name: 'test',
         } as any)).toBe(false);

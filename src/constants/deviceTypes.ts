@@ -24,6 +24,11 @@ export const isCameraDevice = (device: YandexDevice): boolean => {
         || device.capabilities.some((cap) => cap.type === 'devices.capabilities.video_stream');
 };
 
+/** Native Yandex cameras use devices.types.camera; partner cameras expose video_stream on other types. */
+export const isYandexCameraDevice = (device: YandexDevice): boolean => {
+    return device.type.startsWith('devices.types.camera');
+};
+
 export const isAlwaysOnDevice = (device: YandexDevice): boolean => {
     const t = device.type.toLowerCase();
     return t.includes('smart_speaker') || t.includes('hub') || t.includes('other');

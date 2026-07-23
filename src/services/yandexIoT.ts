@@ -2,9 +2,12 @@ import { YandexUserInfoResponse, YandexDevice, YandexModeAction, CameraStreamRes
 
 const yandexApi = window.api;
 
-export const fetchUserInfo = async (token: string): Promise<YandexUserInfoResponse> => {
+export const fetchUserInfo = async (
+    token: string,
+    options?: { retry?: boolean },
+): Promise<YandexUserInfoResponse> => {
     try {
-        const userInfo = await yandexApi.fetchUserInfo(token) as YandexUserInfoResponse;
+        const userInfo = await yandexApi.fetchUserInfo(token, options) as YandexUserInfoResponse;
 
         const knownDeviceIds = new Set(userInfo.devices.map(d => d.id));
         const roomDeviceIds = new Set(userInfo.rooms.flatMap(r => r.devices));
@@ -108,9 +111,12 @@ export const setCameraPrivacyMode = async (
     }
 };
 
-export const getQuasarCameraDevice = async (deviceId: string): Promise<YandexDevice> => {
+export const getQuasarCameraDevice = async (
+    deviceId: string,
+    options?: { retry?: boolean },
+): Promise<YandexDevice> => {
     try {
-        return await yandexApi.getQuasarCameraDevice(deviceId);
+        return await yandexApi.getQuasarCameraDevice(deviceId, options);
     } catch (error) {
         console.error('Ошибка при получении камеры из Quasar:', error);
         throw error;

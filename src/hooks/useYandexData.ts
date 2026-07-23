@@ -34,7 +34,7 @@ export function useYandexData(
             setIsRefreshing(true);
         }
         try {
-            const data = await fetchUserInfo(apiToken);
+            const data = await fetchUserInfo(apiToken, { retry: !silent });
             const sortedData = stableSortData(data);
             const hasChanges = hasDeviceStateChanges(userDataRef.current, sortedData);
             setUserData(sortedData);

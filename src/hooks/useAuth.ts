@@ -1,4 +1,4 @@
-import { useState, useCallback, useEffect } from 'react';
+import { useState, useCallback, useEffect, useRef } from 'react';
 import { fetchUserInfo } from '../services/yandexIoT';
 import { AppState, YandexUserInfoResponse } from '../types/index';
 import { stableSortData } from '../utils/dataUtils';
@@ -7,6 +7,7 @@ import { cleanErrorMessage } from '../utils/errors';
 const yandexApi = window.api;
 
 interface RetryInfo {
+    action: string;
     attempt: number;
     maxAttempts: number;
     message: string;
@@ -33,15 +34,22 @@ export function useAuth(): UseAuthReturn {
     const [errorMsg, setErrorMsg] = useState<string | undefined>(undefined);
     const [retryInfo, setRetryInfo] = useState<RetryInfo | null>(null);
     const [userData, setUserData] = useState<YandexUserInfoResponse | null>(null);
+    const appStateRef = useRef(appState);
+
+    useEffect(() => {
+        appStateRef.current = appState;
+    }, [appState]);
 
     const loadData = useCallback(async (apiToken: string) => {
         setAppState(AppState.LOADING);
         setErrorMsg(undefined);
+        setRetryInfo(null);
         try {
             const data = await fetchUserInfo(apiToken);
             const sortedData = stableSortData(data);
             setUserData(sortedData);
             setAppState(AppState.DASHBOARD);
+            setRetryInfo(null);
             // promptXTokenIfNeeded будет вызываться из useYandexData
         } catch (err: unknown) {
             setErrorMsg(cleanErrorMessage(err));
@@ -80,6 +88,12 @@ export function useAuth(): UseAuthReturn {
     useEffect(() => {
         if (!window.api?.onRetryAttempt) return;
         const unsubscribe = window.api.onRetryAttempt((data: RetryInfo) => {
+            if (appStateRef.current !== AppState.LOADING) {
+                return;
+            }
+            if (data.action !== 'fetchUserInfo') {
+                return;
+            }
             setRetryInfo(data);
         });
         return () => {
