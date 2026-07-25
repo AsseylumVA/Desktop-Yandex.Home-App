@@ -168,8 +168,13 @@ export const CameraStreamModal: React.FC<CameraStreamModalProps> = ({
 
   const cleanupPlayer = useCallback(() => {
     abortStreamSession();
-    audioBoostRef.current?.release();
-    audioBoostRef.current = null;
+    if (audioBoostRef.current) {
+      debugLog('camera', 'cleanupPlayer releaseVideoAudioBoost', {
+        contextState: audioBoostRef.current.contextState,
+      });
+      audioBoostRef.current.release();
+      audioBoostRef.current = null;
+    }
     if (hlsRef.current) {
       hlsRef.current.destroy();
       hlsRef.current = null;
@@ -609,24 +614,73 @@ export const CameraStreamModal: React.FC<CameraStreamModalProps> = ({
   // Do NOT depend on cameraDevice — privacy polls refresh it every ~20s and would re-run
   // this effect; tearing down MediaElementSource then re-attaching throws InvalidStateError
   // and can unmount the entire React tree (blank app, only CSS background left).
+  //
+  // CRITICAL: createMediaElementSource must run AFTER the element has a MediaStream.
+  // Attaching on an empty <video> and then switching srcObject (Goloom combined stream)
+  // often yields silent playback in Chromium/Electron even though the audio track is live.
   useEffect(() => {
     if (!isOpen || !streamProtocol) return;
     const video = videoRef.current;
     if (!video) return;
+    if (!isYandexCameraDevice(cameraDeviceRef.current)) return;
 
-    video.muted = false;
-    video.volume = 1;
-    if (isYandexCameraDevice(cameraDeviceRef.current)) {
-      debugLog('camera', 'attachVideoAudioBoost', { streamProtocol, videoWidth: video.videoWidth });
+    const applyBoost = (reason: string) => {
+      const stream = video.srcObject;
+      if (stream instanceof MediaStream) {
+        const liveAudio = stream.getAudioTracks().filter((t) => t.readyState === 'live');
+        if (liveAudio.length === 0) {
+          debugLog('camera', 'skip attachVideoAudioBoost — waiting for audio track', {
+            reason,
+            videoTracks: stream.getVideoTracks().length,
+          });
+          return;
+        }
+      } else if (video.readyState < HTMLMediaElement.HAVE_CURRENT_DATA) {
+        debugLog('camera', 'skip attachVideoAudioBoost — no media yet', {
+          reason,
+          readyState: video.readyState,
+        });
+        return;
+      }
+
+      video.muted = false;
+      video.volume = 1;
       try {
-        audioBoostRef.current = attachVideoAudioBoost(video);
+        const boost = attachVideoAudioBoost(video);
+        audioBoostRef.current = boost;
+        debugLog('camera', 'attachVideoAudioBoost', {
+          reason,
+          streamProtocol,
+          videoWidth: video.videoWidth,
+          contextState: boost.contextState,
+          paused: video.paused,
+          audioTracks: stream instanceof MediaStream
+            ? stream.getAudioTracks().map((t) => ({
+              id: t.id,
+              enabled: t.enabled,
+              muted: t.muted,
+              readyState: t.readyState,
+            }))
+            : null,
+        });
+        boost.resume();
       } catch (err) {
         debugWarn('camera', 'attachVideoAudioBoost failed', err);
       }
+    };
+
+    const onPlaying = () => applyBoost('playing');
+    video.addEventListener('playing', onPlaying);
+    // If playback already started before this effect ran, attach immediately.
+    if (!video.paused && video.readyState >= HTMLMediaElement.HAVE_CURRENT_DATA) {
+      applyBoost('effect-already-playing');
     }
 
     return () => {
-      debugLog('camera', 'releaseVideoAudioBoost');
+      video.removeEventListener('playing', onPlaying);
+      debugLog('camera', 'releaseVideoAudioBoost', {
+        contextState: audioBoostRef.current?.contextState,
+      });
       audioBoostRef.current?.release();
       audioBoostRef.current = null;
     };

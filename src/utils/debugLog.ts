@@ -34,10 +34,21 @@ export const isDebugEnabled = (channel: string): boolean => {
   return flags.has(channel.toLowerCase()) || flags.has('*');
 };
 
+const formatDebugArg = (arg: unknown): unknown => {
+  if (arg !== null && typeof arg === 'object' && !(arg instanceof Error) && !(arg instanceof Event)) {
+    try {
+      return JSON.stringify(arg);
+    } catch {
+      return arg;
+    }
+  }
+  return arg;
+};
+
 export const debugLog = (channel: string, ...args: unknown[]): void => {
   if (!isDebugEnabled(channel)) return;
   const tag = `[Debug:${channel}]`;
-  console.log(tag, ...args);
+  console.log(tag, ...args.map(formatDebugArg));
 };
 
 export const debugWarn = (channel: string, ...args: unknown[]): void => {
