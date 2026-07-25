@@ -11,6 +11,10 @@ const attached = new WeakMap<HTMLVideoElement, VideoAudioBoost>();
 /**
  * Route <video> audio through a GainNode so volume can exceed HTMLMediaElement's 1.0 cap.
  * Safe to call repeatedly on the same element — createMediaElementSource runs once.
+ *
+ * IMPORTANT: HTMLMediaElement may only have createMediaElementSource() called once
+ * for its lifetime. Releasing must NOT tear down the MediaElementSource graph, or the
+ * next attach on the same <video> throws InvalidStateError and can crash the React tree.
  */
 export const attachVideoAudioBoost = (
   video: HTMLVideoElement,
@@ -37,12 +41,10 @@ export const attachVideoAudioBoost = (
     setGain: (value) => { gainNode.gain.value = value; },
     release: () => {
       video.removeEventListener('play', resume);
-      attached.delete(video);
-      try {
-        source.disconnect();
-        gainNode.disconnect();
-      } catch { /* ignore */ }
-      void ctx.close();
+      // Reset audible boost but keep MediaElementSource + WeakMap entry.
+      // createMediaElementSource cannot be called again on this element.
+      gainNode.gain.value = 1;
+      void ctx.suspend();
     },
   };
 

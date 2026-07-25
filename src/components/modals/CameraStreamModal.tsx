@@ -12,6 +12,7 @@ import {
   getCameraPrivacyInstance,
 } from '../../constants';
 import { attachVideoAudioBoost, VideoAudioBoost } from '../../utils/videoAudioBoost';
+import { debugLog, debugWarn } from '../../utils/debugLog';
 import { X, RefreshCw, Loader2, Video, AlertCircle, Eye, EyeOff, Maximize2, Settings2, PictureInPicture2 } from 'lucide-react';
 
 const QUALITY_PRESETS = [
@@ -605,6 +606,9 @@ export const CameraStreamModal: React.FC<CameraStreamModalProps> = ({
   }, []);
 
   // Boost Yandex camera audio above the HTMLMediaElement 1.0 volume cap (mics are often quiet).
+  // Do NOT depend on cameraDevice — privacy polls refresh it every ~20s and would re-run
+  // this effect; tearing down MediaElementSource then re-attaching throws InvalidStateError
+  // and can unmount the entire React tree (blank app, only CSS background left).
   useEffect(() => {
     if (!isOpen || !streamProtocol) return;
     const video = videoRef.current;
@@ -612,15 +616,21 @@ export const CameraStreamModal: React.FC<CameraStreamModalProps> = ({
 
     video.muted = false;
     video.volume = 1;
-    if (isYandexCameraDevice(cameraDevice)) {
-      audioBoostRef.current = attachVideoAudioBoost(video);
+    if (isYandexCameraDevice(cameraDeviceRef.current)) {
+      debugLog('camera', 'attachVideoAudioBoost', { streamProtocol, videoWidth: video.videoWidth });
+      try {
+        audioBoostRef.current = attachVideoAudioBoost(video);
+      } catch (err) {
+        debugWarn('camera', 'attachVideoAudioBoost failed', err);
+      }
     }
 
     return () => {
+      debugLog('camera', 'releaseVideoAudioBoost');
       audioBoostRef.current?.release();
       audioBoostRef.current = null;
     };
-  }, [isOpen, streamProtocol, cameraDevice]);
+  }, [isOpen, streamProtocol]);
 
   // Hide freeze-frame overlay once the live stream resumes
   useEffect(() => {
@@ -726,6 +736,7 @@ export const CameraStreamModal: React.FC<CameraStreamModalProps> = ({
   }, [privacyEnabled, streamProtocol, isLoading, isOpen, cleanupPlayer]);
 
   useEffect(() => {
+    debugLog('camera', 'modal isOpen effect', { isOpen, deviceId: device.id, session: sessionRef.current });
     if (!isOpen) {
       cleanupPlayer();
       setError(null);
@@ -760,13 +771,28 @@ export const CameraStreamModal: React.FC<CameraStreamModalProps> = ({
     void openStream();
 
     return () => {
+      debugLog('camera', 'modal isOpen cleanup', { deviceId: device.id });
       cleanupPlayer();
     };
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isOpen]);
 
   // Final safety net when Dashboard unmounts the modal entirely
-  useEffect(() => () => { cleanupPlayer(); }, [cleanupPlayer]);
+  useEffect(() => () => {
+    debugLog('camera', 'modal unmount cleanupPlayer');
+    cleanupPlayer();
+  }, [cleanupPlayer]);
+
+  useEffect(() => {
+    debugLog('camera', 'ui state', {
+      isOpen,
+      streamProtocol,
+      isLoading,
+      privacyEnabled,
+      hasError: Boolean(error),
+      session: sessionRef.current,
+    });
+  }, [isOpen, streamProtocol, isLoading, privacyEnabled, error]);
 
   if (!isOpen) {
     return null;
